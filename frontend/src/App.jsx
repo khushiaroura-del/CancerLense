@@ -1,140 +1,319 @@
-import {
-  Activity,
-  AlertCircle,
-  ArrowRight,
-  Camera,
-  CheckCircle2,
-  CircleAlert,
-  Clock3,
-  FileImage,
-  FolderOpen,
-  Info,
-  Loader2,
-  Microscope,
-  RefreshCcw,
-  ScanSearch,
-  ShieldCheck,
-  Sparkles,
-  Upload,
-  UserRound,
-  X,
-} from "lucide-react";
-import axios from "axios";
 import { useEffect, useRef, useState } from "react";
+import axios from "axios";
 
-import PatientContext from "./components/PatientContext";
-import RedFlagPanel from "./components/RedFlagPanel";
+import {
+  LayoutDashboard,
+  ScanLine,
+  History,
+  BarChart3,
+  FlaskConical,
+  Settings,
+  CircleUserRound,
+  ChevronRight,
+  Activity,
+  ShieldCheck,
+  Upload,
+  Camera,
+  Image as ImageIcon,
+  X,
+  RotateCcw,
+  Play,
+  CheckCircle2,
+  AlertTriangle,
+  Info,
+  BrainCircuit,
+  Sparkles,
+  Ruler,
+  Eye,
+  FileImage,
+  UserRound,
+  MapPin,
+  Clock3,
+  Stethoscope,
+} from "lucide-react";
 
 import "./App.css";
 
+
+/* =========================================================
+   CONFIG
+========================================================= */
+
 const API_URL = "http://127.0.0.1:8000";
 
-const initialPatientContext = {
-  ageGroup: "",
-  tobaccoExposure: "",
-  alcoholExposure: "",
-  previousOralLesion: "",
-  previousOralCancer: "",
-  dentalHistory: "",
-  symptoms: [],
-  symptomDuration: "",
-  symptomNotes: "",
-};
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const lesionLocations = [
+  "Tongue — Left Side",
+  "Tongue — Right Side",
+  "Tongue — Top Surface",
+  "Tongue — Underside",
+  "Floor of Mouth",
+  "Inner Cheek — Left",
+  "Inner Cheek — Right",
+  "Upper Gum",
+  "Lower Gum",
+  "Hard Palate",
+  "Soft Palate",
+  "Upper Lip — Inner",
+  "Lower Lip — Inner",
+  "Other / Unspecified",
+];
+
+
+const symptomOptions = [
+  "Persistent mouth sore",
+  "Pain or discomfort",
+  "Bleeding",
+  "Non-healing lesion",
+  "Lump or thickening",
+  "White or red patch",
+  "Difficulty chewing",
+  "Difficulty swallowing",
+  "Numbness",
+  "Voice changes",
+];
+
+
+/* =========================================================
+   APP
+========================================================= */
 
 function App() {
-  // ============================================================
-  // IMAGE STATE
-  // ============================================================
 
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [imageSource, setImageSource] = useState("");
-  const [dragActive, setDragActive] = useState(false);
+  const [activePage, setActivePage] =
+    useState("Dashboard");
 
-  // ============================================================
-  // CAMERA STATE
-  // ============================================================
+  const [selectedFile, setSelectedFile] =
+    useState(null);
 
-  const [cameraOpen, setCameraOpen] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [cameraError, setCameraError] = useState("");
-  const [capturedPreview, setCapturedPreview] = useState("");
+  const [previewUrl, setPreviewUrl] =
+    useState("");
 
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const streamRef = useRef(null);
-
-  // ============================================================
-  // ANALYSIS STATE
-  // ============================================================
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [result, setResult] = useState(null);
-
-  // ============================================================
-  // UI STATE
-  // ============================================================
-
-  const [activeExplainability, setActiveExplainability] =
-    useState("original");
-
-  const [showPatientContext, setShowPatientContext] =
+  const [dragActive, setDragActive] =
     useState(false);
 
-  const [patientContext, setPatientContext] = useState(
-    initialPatientContext
-  );
+  const [cameraOpen, setCameraOpen] =
+    useState(false);
 
-  // ============================================================
-  // CAMERA CLEANUP
-  // ============================================================
+  const [cameraStream, setCameraStream] =
+    useState(null);
 
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        track.stop();
-      });
+  const [analysisResult, setAnalysisResult] =
+    useState(null);
 
-      streamRef.current = null;
-    }
+  const [isAnalyzing, setIsAnalyzing] =
+    useState(false);
 
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
+  const [errorMessage, setErrorMessage] =
+    useState("");
 
-    setCameraReady(false);
+  const [lesionLocation, setLesionLocation] =
+    useState("");
+
+  const [patientContext, setPatientContext] =
+    useState({
+      ageGroup: "",
+      tobacco: "",
+      alcohol: "",
+      previousOralLesion: "",
+      previousOralCancer: "",
+      dentalHistory: "",
+      symptoms: [],
+      symptomDuration: "",
+      notes: "",
+    });
+
+  const [showContext, setShowContext] =
+    useState(false);
+
+  const videoRef = useRef(null);
+
+  const canvasRef = useRef(null);
+
+  const fileInputRef = useRef(null);
+
+  const cameraInputRef = useRef(null);
+
+
+  /* =======================================================
+     NAVIGATION
+  ======================================================= */
+
+  const navigation = [
+    {
+      label: "Dashboard",
+      icon: LayoutDashboard,
+    },
+    {
+      label: "Screen",
+      icon: ScanLine,
+    },
+    {
+      label: "History",
+      icon: Clock3,
+    },
+    {
+      label: "Analytics",
+      icon: BarChart3,
+    },
+    {
+      label: "Research",
+      icon: FlaskConical,
+    },
+    {
+      label: "Settings",
+      icon: Settings,
+    },
+  ];
+
+
+  const pageTitles = {
+    Dashboard: "Dashboard",
+    Screen: "Capture & Screen",
+    History: "Scan History",
+    Analytics: "Analytics",
+    Research: "Research & Model",
+    Settings: "Settings",
   };
 
+
+  /* =======================================================
+     FILE PREVIEW
+  ======================================================= */
+
   useEffect(() => {
+
+    if (!selectedFile) {
+      setPreviewUrl("");
+      return;
+    }
+
+    const url =
+      URL.createObjectURL(selectedFile);
+
+    setPreviewUrl(url);
+
     return () => {
-      stopCamera();
+      URL.revokeObjectURL(url);
     };
-  }, []);
 
-  // ============================================================
-  // PREVIEW CLEANUP
-  // ============================================================
+  }, [selectedFile]);
+
+
+  /* =======================================================
+     CAMERA CLEANUP
+  ======================================================= */
 
   useEffect(() => {
+
     return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
+
+      if (cameraStream) {
+
+        cameraStream
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+
       }
+
     };
-  }, [previewUrl]);
 
-  // ============================================================
-  // START CAMERA
-  // ============================================================
+  }, [cameraStream]);
 
-  const startCamera = async () => {
-    setCameraError("");
-    setCapturedPreview("");
-    setCameraOpen(true);
+
+  /* =======================================================
+     FILE SELECT
+  ======================================================= */
+
+  const handleFileSelect = (file) => {
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+
+      setErrorMessage(
+        "Please select a valid image file."
+      );
+
+      return;
+    }
+
+    setErrorMessage("");
+
+    setAnalysisResult(null);
+
+    setSelectedFile(file);
+  };
+
+
+  /* =======================================================
+     FILE INPUT
+  ======================================================= */
+
+  const handleFileInput = (event) => {
+
+    const file =
+      event.target.files?.[0];
+
+    handleFileSelect(file);
+
+    event.target.value = "";
+  };
+
+
+  /* =======================================================
+     DRAG & DROP
+  ======================================================= */
+
+  const handleDragOver = (event) => {
+
+    event.preventDefault();
+
+    setDragActive(true);
+  };
+
+
+  const handleDragLeave = (event) => {
+
+    event.preventDefault();
+
+    setDragActive(false);
+  };
+
+
+  const handleDrop = (event) => {
+
+    event.preventDefault();
+
+    setDragActive(false);
+
+    const file =
+      event.dataTransfer.files?.[0];
+
+    handleFileSelect(file);
+  };
+
+
+  /* =======================================================
+     CAMERA
+  ======================================================= */
+
+  const openCamera = async () => {
+
+    setErrorMessage("");
 
     try {
-      if (!navigator.mediaDevices?.getUserMedia) {
+
+      if (
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+      ) {
         throw new Error(
           "Camera access is not supported by this browser."
         );
@@ -144,1315 +323,2026 @@ function App() {
         await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "environment",
-            width: {
-              ideal: 1280,
-            },
-            height: {
-              ideal: 720,
-            },
           },
           audio: false,
         });
 
-      streamRef.current = stream;
+      setCameraStream(stream);
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+      setCameraOpen(true);
 
-        await videoRef.current.play();
+      setTimeout(() => {
 
-        setCameraReady(true);
-      }
-    } catch (cameraAccessError) {
-      console.error(cameraAccessError);
+        if (videoRef.current) {
 
-      setCameraError(
-        "Camera access was blocked or unavailable. Please allow camera permission and try again."
+          videoRef.current.srcObject =
+            stream;
+
+        }
+
+      }, 100);
+
+    } catch (error) {
+
+      console.error(error);
+
+      setErrorMessage(
+        "Camera access could not be started. Please allow camera permission or upload an image instead."
       );
 
-      stopCamera();
     }
+
   };
 
-  // ============================================================
-  // CLOSE CAMERA
-  // ============================================================
 
   const closeCamera = () => {
-    stopCamera();
+
+    if (cameraStream) {
+
+      cameraStream
+        .getTracks()
+        .forEach((track) =>
+          track.stop()
+        );
+
+    }
+
+    setCameraStream(null);
 
     setCameraOpen(false);
-    setCameraError("");
-    setCapturedPreview("");
   };
 
-  // ============================================================
-  // CAPTURE PHOTO
-  // ============================================================
 
   const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) {
+
+    if (
+      !videoRef.current ||
+      !canvasRef.current
+    ) {
       return;
     }
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
+    const video =
+      videoRef.current;
 
-    const width = video.videoWidth;
-    const height = video.videoHeight;
+    const canvas =
+      canvasRef.current;
 
-    if (!width || !height) {
-      setCameraError(
-        "Camera is not ready yet. Please wait a moment and try again."
-      );
+    canvas.width =
+      video.videoWidth;
 
-      return;
-    }
+    canvas.height =
+      video.videoHeight;
 
-    canvas.width = width;
-    canvas.height = height;
-
-    const context = canvas.getContext("2d");
+    const context =
+      canvas.getContext("2d");
 
     context.drawImage(
       video,
       0,
       0,
-      width,
-      height
+      canvas.width,
+      canvas.height
     );
 
     canvas.toBlob(
       (blob) => {
-        if (!blob) {
-          setCameraError(
-            "Unable to capture the image. Please try again."
+
+        if (!blob) return;
+
+        const file =
+          new File(
+            [blob],
+            `cancerlense-camera-${Date.now()}.jpg`,
+            {
+              type: "image/jpeg",
+            }
           );
 
-          return;
-        }
+        handleFileSelect(file);
 
-        const timestamp = new Date()
-          .toISOString()
-          .replace(/[:.]/g, "-");
+        closeCamera();
 
-        const file = new File(
-          [blob],
-          `cancerlense-camera-${timestamp}.jpg`,
-          {
-            type: "image/jpeg",
-          }
-        );
-
-        const url = URL.createObjectURL(file);
-
-        setSelectedFile(file);
-        setImageSource("camera");
-        setResult(null);
-        setError("");
-
-        setPreviewUrl((oldUrl) => {
-          if (oldUrl) {
-            URL.revokeObjectURL(oldUrl);
-          }
-
-          return url;
-        });
-
-        setCapturedPreview(url);
       },
       "image/jpeg",
-      0.95
+      0.94
     );
   };
 
-  // ============================================================
-  // RETAKE
-  // ============================================================
 
-  const retakePhoto = () => {
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
+  /* =======================================================
+     CONTEXT
+  ======================================================= */
 
-    setSelectedFile(null);
-    setCapturedPreview("");
-    setPreviewUrl("");
-    setImageSource("");
-    setError("");
-    setResult(null);
+  const toggleSymptom = (symptom) => {
 
-    if (videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-    }
-  };
+    setPatientContext((previous) => {
 
-  // ============================================================
-  // USE PHOTO
-  // ============================================================
+      const exists =
+        previous.symptoms.includes(symptom);
 
-  const useCapturedPhoto = () => {
-    stopCamera();
+      return {
+        ...previous,
+        symptoms: exists
+          ? previous.symptoms.filter(
+              (item) => item !== symptom
+            )
+          : [
+              ...previous.symptoms,
+              symptom,
+            ],
+      };
 
-    setCameraOpen(false);
-    setCapturedPreview("");
-  };
-
-  // ============================================================
-  // HANDLE FILE
-  // ============================================================
-
-  const handleFile = (file) => {
-    if (!file) {
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      setError("Please select a valid image file.");
-      return;
-    }
-
-    const maxSize = 15 * 1024 * 1024;
-
-    if (file.size > maxSize) {
-      setError(
-        "Image is too large. Please choose an image below 15 MB."
-      );
-
-      return;
-    }
-
-    const url = URL.createObjectURL(file);
-
-    setSelectedFile(file);
-    setImageSource("device");
-    setError("");
-    setResult(null);
-
-    setPreviewUrl((oldUrl) => {
-      if (oldUrl) {
-        URL.revokeObjectURL(oldUrl);
-      }
-
-      return url;
     });
+
   };
 
-  // ============================================================
-  // FILE INPUT
-  // ============================================================
 
-  const handleFileInput = (event) => {
-    const file = event.target.files?.[0];
+  /* =======================================================
+     RED FLAG / CONTEXT FLAGS
+  ======================================================= */
 
-    handleFile(file);
+  const getContextFlags = () => {
 
-    event.target.value = "";
-  };
+    const flags = [];
 
-  // ============================================================
-  // DRAG & DROP
-  // ============================================================
+    const {
+      symptoms,
+      symptomDuration,
+      tobacco,
+      alcohol,
+      previousOralLesion,
+      previousOralCancer,
+    } = patientContext;
 
-  const handleDragEnter = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
 
-    setDragActive(true);
-  };
-
-  const handleDragLeave = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    setDragActive(false);
-  };
-
-  const handleDragOver = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    setDragActive(true);
-  };
-
-  const handleDrop = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    setDragActive(false);
-
-    const file = event.dataTransfer.files?.[0];
-
-    handleFile(file);
-  };
-
-  // ============================================================
-  // NORMALIZE API RESULT
-  // ============================================================
-
-  const normalizeResult = (data) => {
-    if (!data) {
-      return null;
+    if (
+      symptoms.includes(
+        "Persistent mouth sore"
+      )
+    ) {
+      flags.push(
+        "Persistent mouth sore reported"
+      );
     }
 
-    return {
-      ...data,
 
-      prediction_class:
-        data.prediction_class ||
-        data.prediction ||
-        "unknown",
+    if (
+      symptoms.includes(
+        "Non-healing lesion"
+      )
+    ) {
+      flags.push(
+        "Non-healing lesion reported"
+      );
+    }
 
-      model_confidence:
-        Number(
-          data.model_confidence ??
-            data.confidence ??
-            0
-        ),
 
-      class_scores: data.class_scores || {},
+    if (
+      symptoms.includes("Bleeding")
+    ) {
+      flags.push(
+        "Bleeding reported"
+      );
+    }
 
-      quality: data.quality || {},
 
-      recommendation:
-        data.recommendation ||
-        "Professional clinical evaluation is recommended.",
+    if (
+      symptoms.includes(
+        "White or red patch"
+      )
+    ) {
+      flags.push(
+        "White or red patch reported"
+      );
+    }
 
-      note:
-        data.note ||
-        "This is an AI-assisted research screening output and not a medical diagnosis.",
 
-      gradcam: data.gradcam || null,
-    };
+    if (
+      symptoms.includes(
+        "Lump or thickening"
+      )
+    ) {
+      flags.push(
+        "Lump or thickening reported"
+      );
+    }
+
+
+    if (
+      symptoms.includes(
+        "Difficulty swallowing"
+      )
+    ) {
+      flags.push(
+        "Difficulty swallowing reported"
+      );
+    }
+
+
+    if (
+      symptoms.includes("Numbness")
+    ) {
+      flags.push(
+        "Numbness reported"
+      );
+    }
+
+
+    if (
+      symptomDuration &&
+      symptomDuration !== "Not sure"
+    ) {
+      flags.push(
+        `Symptoms reported for ${symptomDuration}`
+      );
+    }
+
+
+    if (tobacco === "Current") {
+      flags.push(
+        "Current tobacco exposure reported"
+      );
+    }
+
+
+    if (alcohol === "Regular") {
+      flags.push(
+        "Regular alcohol exposure reported"
+      );
+    }
+
+
+    if (
+      previousOralLesion === "Yes"
+    ) {
+      flags.push(
+        "Previous oral lesion reported"
+      );
+    }
+
+
+    if (
+      previousOralCancer === "Yes"
+    ) {
+      flags.push(
+        "Previous oral cancer reported"
+      );
+    }
+
+
+    return flags;
   };
 
-  // ============================================================
-  // ANALYZE
-  // ============================================================
+
+  /* =======================================================
+     ANALYZE
+  ======================================================= */
 
   const analyzeImage = async () => {
+
     if (!selectedFile) {
-      setError("Please select or capture an image first.");
+
+      setErrorMessage(
+        "Please upload or capture an oral image first."
+      );
+
       return;
     }
 
-    setLoading(true);
-    setError("");
-    setResult(null);
-    setActiveExplainability("original");
+
+    setIsAnalyzing(true);
+
+    setErrorMessage("");
+
+    setAnalysisResult(null);
+
 
     try {
-      const formData = new FormData();
 
-      formData.append("file", selectedFile);
+      const formData =
+        new FormData();
 
-      const response = await axios.post(
-        `${API_URL}/analyze`,
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        }
+      formData.append(
+        "file",
+        selectedFile
       );
 
-      const normalized = normalizeResult(
+
+      const response =
+        await axios.post(
+          `${API_URL}/analyze`,
+          formData,
+          {
+            headers: {
+              "Content-Type":
+                "multipart/form-data",
+            },
+          }
+        );
+
+
+      setAnalysisResult(
         response.data
       );
 
-      setResult(normalized);
-    } catch (requestError) {
-      console.error(requestError);
+    } catch (error) {
 
-      if (requestError.response?.data?.detail) {
-        setError(
-          typeof requestError.response.data.detail ===
-            "string"
-            ? requestError.response.data.detail
-            : "The backend rejected the image."
+      console.error(
+        "CancerLense analysis error:",
+        error
+      );
+
+
+      if (
+        error.response?.data?.detail
+      ) {
+
+        setErrorMessage(
+          String(
+            error.response.data.detail
+          )
         );
-      } else if (requestError.request) {
-        setError(
-          "CancerLense backend is not reachable. Make sure FastAPI is running on port 8000."
+
+      } else if (
+        error.code === "ERR_NETWORK"
+      ) {
+
+        setErrorMessage(
+          "CancerLense backend is not reachable. Make sure FastAPI is running on http://127.0.0.1:8000."
         );
+
       } else {
-        setError(
-          "Something went wrong while analyzing the image."
+
+        setErrorMessage(
+          "Analysis could not be completed. Please check the backend and try again."
         );
+
       }
+
     } finally {
-      setLoading(false);
+
+      setIsAnalyzing(false);
     }
   };
 
-  // ============================================================
-  // RESET
-  // ============================================================
 
-  const resetCase = () => {
-    stopCamera();
+  /* =======================================================
+     RESET SCREEN
+  ======================================================= */
 
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
-
-    setCameraOpen(false);
-    setCameraError("");
-    setCapturedPreview("");
+  const resetScreen = () => {
 
     setSelectedFile(null);
-    setPreviewUrl("");
-    setImageSource("");
 
-    setResult(null);
-    setError("");
+    setAnalysisResult(null);
 
-    setPatientContext(initialPatientContext);
+    setErrorMessage("");
 
-    setActiveExplainability("original");
+    setLesionLocation("");
+
+    setShowContext(false);
   };
 
-  // ============================================================
-  // PATIENT CONTEXT
-  // ============================================================
 
-  const handlePatientContextSave = (data) => {
-    setPatientContext(data);
-    setShowPatientContext(false);
+  /* =======================================================
+     GRAD-CAM URL
+  ======================================================= */
+
+  const getGradcamUrl = () => {
+
+    if (!analysisResult?.gradcam) {
+      return "";
+    }
+
+    if (
+      analysisResult.gradcam.startsWith(
+        "http"
+      )
+    ) {
+      return analysisResult.gradcam;
+    }
+
+    return `${API_URL}${analysisResult.gradcam}`;
   };
 
-  // ============================================================
-  // RESULT HELPERS
-  // ============================================================
 
-  const predictionClass =
-    result?.prediction_class?.toLowerCase() || "";
+  /* =======================================================
+     HELPERS
+  ======================================================= */
 
-  const isCancer =
-    predictionClass === "cancer";
+  const formatNumber = (
+    value,
+    decimals = 2
+  ) => {
 
-  const isNonCancer =
-    predictionClass === "non_cancer" ||
-    predictionClass === "non-cancer" ||
-    predictionClass === "noncancer";
+    if (
+      value === null ||
+      value === undefined ||
+      Number.isNaN(Number(value))
+    ) {
+      return "—";
+    }
 
-  const confidence = Number(
-    result?.model_confidence || 0
-  );
+    return Number(value).toFixed(
+      decimals
+    );
+  };
 
-  const cancerScore = Number(
-    result?.class_scores?.cancer || 0
-  );
 
-  const nonCancerScore = Number(
-    result?.class_scores?.non_cancer ??
-      result?.class_scores?.["non-cancer"] ??
-      0
-  );
+  const getSignalClass = () => {
 
-  const gradcamUrl = result?.gradcam
-    ? result.gradcam.startsWith("http")
-      ? result.gradcam
-      : `${API_URL}${result.gradcam}`
-    : "";
+    if (
+      analysisResult?.prediction_class ===
+      "cancer"
+    ) {
+      return "signal-cancer";
+    }
 
-  // ============================================================
-  // TIMELINE
-  // ============================================================
+    return "signal-neutral";
+  };
 
-  const timeline = [
-    {
-      title: "Image received",
-      detail:
-        selectedFile?.name ||
-        "No image selected",
-      icon: FileImage,
-      complete: Boolean(selectedFile),
-    },
-    {
-      title: "Image quality checked",
-      detail:
-        result?.quality?.quality_status ||
-        "Waiting for analysis",
-      icon: ScanSearch,
-      complete: Boolean(result),
-    },
-    {
-      title: "AI screening completed",
-      detail: result
-        ? `${confidence.toFixed(2)}% model confidence`
-        : "Waiting for analysis",
-      icon: Sparkles,
-      complete: Boolean(result),
-    },
-    {
-      title: "Explainability generated",
-      detail: result?.gradcam
-        ? "Attention map available"
-        : "Waiting for analysis",
-      icon: Microscope,
-      complete: Boolean(result?.gradcam),
-    },
-  ];
 
-  const sourceLabel =
-    imageSource === "camera"
-      ? "CAMERA CAPTURE"
-      : imageSource === "device"
-        ? "DEVICE / DATASET"
-        : "NO IMAGE";
+  const getQualityClass = () => {
 
-  // ============================================================
-  // UI
-  // ============================================================
+    const status =
+      analysisResult?.quality?.quality_status;
 
-  return (
-    <div className="app-shell">
+    if (status === "ACCEPTABLE") {
+      return "quality-good";
+    }
 
-      {/* ======================================================
-          NAVBAR
-          ====================================================== */}
+    return "quality-warning";
+  };
 
-      <header className="top-nav">
 
-        <div className="brand">
+  /* =======================================================
+     DASHBOARD
+  ======================================================= */
 
-          <div className="brand-mark">
-            <ScanSearch size={19} />
-          </div>
+  const renderDashboard = () => {
 
-          <div className="brand-copy">
-            <strong>CANCERLENSE</strong>
-            <span>AI RESEARCH SCREENING</span>
-          </div>
+    return (
+      <section className="dashboard-page">
 
-        </div>
-
-        <div className="nav-status">
-          <span className="status-dot" />
-          LOCAL RESEARCH MODE
-        </div>
-
-      </header>
-
-      {/* ======================================================
-          MAIN
-          ====================================================== */}
-
-      <main className="main-container">
-
-        {/* ====================================================
-            HERO
-            ==================================================== */}
-
-        <section className="hero-section">
+        <div className="dashboard-hero">
 
           <div className="hero-copy">
 
-            <div className="hero-eyebrow">
-              <span className="eyebrow-line" />
+            <div className="hero-label">
               AI-ASSISTED ORAL IMAGE SCREENING
             </div>
 
-            <h1>
+            <h2>
               See beyond
               <br />
               <span>the visible.</span>
-            </h1>
+            </h2>
 
-            <p className="hero-description">
-              CancerLense analyzes oral images using a
-              research-oriented computer vision pipeline,
-              image quality assessment and visual
-              explainability.
+            <p>
+              CancerLense is an AI-assisted
+              research prototype designed to
+              analyze oral images, evaluate image
+              quality, surface model signals, and
+              provide explainable visual evidence.
             </p>
+
+            <button
+              className="primary-button"
+              onClick={() =>
+                setActivePage("Screen")
+              }
+            >
+              <span>
+                Start Screening
+              </span>
+
+              <ChevronRight
+                size={17}
+              />
+            </button>
+
 
             <div className="hero-meta">
 
-              <div>
-                <ShieldCheck size={15} />
-                <span>RESEARCH-FIRST</span>
+              <div className="hero-meta-item">
+                <span>MODEL</span>
+                <strong>
+                  MobileNetV3
+                </strong>
               </div>
 
-              <div>
-                <Activity size={15} />
-                <span>IMAGE-BASED</span>
+              <div className="hero-meta-item">
+                <span>EXPLAINABILITY</span>
+                <strong>
+                  Grad-CAM
+                </strong>
               </div>
 
-              <div>
-                <Microscope size={15} />
-                <span>EXPLAINABLE</span>
+              <div className="hero-meta-item">
+                <span>MODE</span>
+                <strong>
+                  Research
+                </strong>
               </div>
 
             </div>
 
           </div>
 
-          {/* ==================================================
-              HERO VISUAL
-              ================================================== */}
 
-          <div className="hero-visual-card">
+          <div className="dashboard-visual">
 
-            <div className="visual-grid" />
-
-            <div className="visual-orbit orbit-one" />
-            <div className="visual-orbit orbit-two" />
-
-            {/* ATMOSPHERE */}
-
-            <div className="hero-medical-visual">
-
-              <div className="hero-medical-glow" />
-
-              <img
-                src="/hero-medical.png"
-                alt="CancerLense oral imaging visualization"
-                className="hero-medical-image"
-              />
-
-              <div className="medical-scan-ring ring-one" />
-              <div className="medical-scan-ring ring-two" />
-
-            </div>
-
-            {/* HUD SCAN FRAME */}
-
-            <div className="scan-frame">
-
-              <span className="frame-corner frame-top-left" />
-              <span className="frame-corner frame-top-right" />
-              <span className="frame-corner frame-bottom-left" />
-              <span className="frame-corner frame-bottom-right" />
-
-              <div className="scan-center">
-
-                <ScanSearch
-                  size={30}
-                  strokeWidth={1.2}
-                />
-
-                <span>READY</span>
-
-              </div>
-
-              <div className="scan-label scan-label-top">
-                CANCERLENSE / VISION CORE
-              </div>
-
-              <div className="scan-label scan-label-bottom">
-                IMAGE → SIGNAL → EXPLANATION
-              </div>
-
-            </div>
-
-            <div className="visual-side-label">
-              <span>01</span>
-              <span>VISION</span>
-            </div>
-
-          </div>
-
-        </section>
-
-        {/* ====================================================
-            IMAGE INPUT
-            ==================================================== */}
-
-        <section className="workspace-section">
-
-          <div className="section-heading">
-
-            <div>
-
-              <span className="section-kicker">
-                01 / IMAGE INPUT
+            <div className="visual-header">
+              <span>
+                CANCERLENSE / 01
               </span>
 
-              <h2>
-                Choose how you want to provide the image.
-              </h2>
+              <span>
+                AI VISION
+              </span>
+            </div>
+
+
+            <div className="scan-visual">
+
+              <div className="scan-grid"></div>
+
+              <div className="scan-glow"></div>
+
+              <div className="scan-ring ring-one"></div>
+
+              <div className="scan-ring ring-two"></div>
+
+              <div className="scan-ring ring-three"></div>
+
+              <div className="scan-center">
+                <ScanLine
+                  size={34}
+                />
+              </div>
+
+              <div className="visual-tag tag-image">
+                IMAGE
+              </div>
+
+              <div className="visual-tag tag-analysis">
+                ANALYSIS
+              </div>
+
+              <div className="visual-tag tag-model">
+                MODEL
+              </div>
+
+              <div className="crosshair horizontal"></div>
+
+              <div className="crosshair vertical"></div>
 
             </div>
 
-            <span className="section-index">
-              INPUT
-            </span>
+
+            <div className="visual-footer">
+
+              <span>
+                MOBILENET V3
+              </span>
+
+              <span>
+                GRAD-CAM
+              </span>
+
+              <span>
+                QUALITY CHECK
+              </span>
+
+            </div>
 
           </div>
 
-          <div className="source-options">
+        </div>
 
-            {/* UPLOAD */}
 
-            <label
-              className={`source-card ${
-                imageSource === "device"
-                  ? "source-card-active"
-                  : ""
-              }`}
-              onDragEnter={handleDragEnter}
-              onDragLeave={handleDragLeave}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-            >
+        <div className="feature-grid">
 
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleFileInput}
-                hidden
-              />
+          <div className="feature-card">
 
-              <div className="source-card-icon">
-                <FolderOpen size={23} />
-              </div>
+            <div className="feature-icon">
+              <ScanLine size={20} />
+            </div>
 
-              <div className="source-card-content">
+            <div>
+              <strong>
+                Fast Screening
+              </strong>
 
-                <div className="source-card-top">
-
-                  <span>
-                    UPLOAD / DATASET
-                  </span>
-
-                  {imageSource === "device" && (
-                    <CheckCircle2 size={16} />
-                  )}
-
-                </div>
-
-                <h3>
-                  Choose an image
-                </h3>
-
-                <p>
-                  Upload an image from your computer
-                  or use a research dataset image.
-                </p>
-
-                <span className="source-card-action">
-                  Browse files
-                  <ArrowRight size={15} />
-                </span>
-
-              </div>
-
-            </label>
-
-            {/* CAMERA */}
-
-            <button
-              type="button"
-              className={`source-card source-card-button ${
-                imageSource === "camera"
-                  ? "source-card-active"
-                  : ""
-              }`}
-              onClick={startCamera}
-            >
-
-              <div className="source-card-icon camera-icon">
-                <Camera size={23} />
-              </div>
-
-              <div className="source-card-content">
-
-                <div className="source-card-top">
-
-                  <span>
-                    LIVE CAMERA
-                  </span>
-
-                  {imageSource === "camera" && (
-                    <CheckCircle2 size={16} />
-                  )}
-
-                </div>
-
-                <h3>
-                  Capture an image
-                </h3>
-
-                <p>
-                  Use your device camera to capture
-                  a new image for research screening.
-                </p>
-
-                <span className="source-card-action">
-                  Open camera
-                  <ArrowRight size={15} />
-                </span>
-
-              </div>
-
-            </button>
+              <span>
+                Image-based AI analysis
+              </span>
+            </div>
 
           </div>
 
-          {/* DRAG DROP */}
 
-          <div
-            className={`upload-zone ${
-              dragActive
-                ? "upload-zone-active"
-                : ""
-            }`}
-            onDragEnter={handleDragEnter}
-            onDragLeave={handleDragLeave}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-          >
+          <div className="feature-card">
 
-            <Upload size={18} />
+            <div className="feature-icon">
+              <Activity size={20} />
+            </div>
 
-            <span>
-              Drag &amp; drop an image here
-            </span>
+            <div>
+              <strong>
+                Explainable
+              </strong>
 
-            <small>
-              JPG, JPEG, PNG · Maximum 15 MB
-            </small>
+              <span>
+                Grad-CAM visual evidence
+              </span>
+            </div>
 
           </div>
 
-          {/* SELECTED IMAGE */}
 
-          {selectedFile && previewUrl && (
+          <div className="feature-card">
 
-            <div className="selected-image-panel">
+            <div className="feature-icon">
+              <ShieldCheck size={20} />
+            </div>
 
-              <div className="selected-image-preview">
+            <div>
+              <strong>
+                Research First
+              </strong>
 
-                <img
-                  src={previewUrl}
-                  alt="Selected oral image"
+              <span>
+                Not a medical diagnosis
+              </span>
+            </div>
+
+          </div>
+
+        </div>
+
+
+        <div className="research-notice">
+
+          <div className="research-notice-icon">
+            <ShieldCheck size={18} />
+          </div>
+
+          <div>
+            <strong>
+              Research prototype
+            </strong>
+
+            <p>
+              CancerLense provides AI-assisted
+              screening signals and visual
+              explanations for research use. It
+              does not provide a medical diagnosis.
+            </p>
+          </div>
+
+        </div>
+
+      </section>
+    );
+  };
+
+
+  /* =======================================================
+     SCREEN PAGE
+  ======================================================= */
+
+  const renderScreen = () => {
+
+    const contextFlags =
+      getContextFlags();
+
+
+    return (
+      <section className="screen-page">
+
+
+        {/* =================================================
+            UPLOAD AREA
+        ================================================= */}
+
+        {!selectedFile && !analysisResult && (
+
+          <div className="screen-intro">
+
+            <div className="screen-intro-copy">
+
+              <div className="screen-eyebrow">
+                CANCERLENSE / CAPTURE
+              </div>
+
+              <h2>
+                Bring the image.
+                <br />
+                <span>Let the model look.</span>
+              </h2>
+
+              <p>
+                Upload an oral image or capture one
+                directly with your camera. CancerLense
+                will evaluate image quality and run
+                the research screening model.
+              </p>
+
+            </div>
+
+
+            <div className="capture-grid">
+
+
+              {/* UPLOAD */}
+
+              <div
+                className={`drop-zone ${
+                  dragActive
+                    ? "drag-active"
+                    : ""
+                }`}
+                onDragOver={
+                  handleDragOver
+                }
+                onDragLeave={
+                  handleDragLeave
+                }
+                onDrop={
+                  handleDrop
+                }
+                onClick={() =>
+                  fileInputRef.current?.click()
+                }
+              >
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={
+                    handleFileInput
+                  }
                 />
 
-                <div className="selected-image-source">
-
-                  <span className="source-live-dot" />
-
-                  SOURCE · {sourceLabel}
-
+                <div className="capture-icon">
+                  <Upload size={25} />
                 </div>
+
+                <h3>
+                  Upload image
+                </h3>
+
+                <p>
+                  Drag & drop an oral image here
+                </p>
+
+                <span>
+                  JPG, JPEG, PNG, WEBP
+                </span>
 
               </div>
 
-              <div className="selected-image-info">
 
-                <div className="selected-image-heading">
+              {/* CAMERA */}
 
-                  <div>
+              <button
+                className="camera-card"
+                onClick={openCamera}
+              >
 
-                    <span className="section-kicker">
-                      IMAGE READY
-                    </span>
-
-                    <h3>
-                      {selectedFile.name}
-                    </h3>
-
-                  </div>
-
-                  <button
-                    type="button"
-                    className="remove-image-button"
-                    onClick={resetCase}
-                    aria-label="Remove image"
-                  >
-                    <X size={17} />
-                  </button>
-
+                <div className="capture-icon">
+                  <Camera size={25} />
                 </div>
 
-                <div className="selected-image-meta">
+                <h3>
+                  Use camera
+                </h3>
 
-                  <div>
-                    <span>TYPE</span>
-                    <strong>
-                      {selectedFile.type ||
-                        "IMAGE"}
-                    </strong>
+                <p>
+                  Capture an image directly
+                </p>
+
+                <span>
+                  Camera access required
+                </span>
+
+              </button>
+
+            </div>
+
+
+            <div className="capture-note">
+
+              <Info size={15} />
+
+              <span>
+                For research screening only. Use
+                clear, well-lit images whenever
+                possible.
+              </span>
+
+            </div>
+
+          </div>
+
+        )}
+
+
+        {/* =================================================
+            IMAGE WORKSPACE
+        ================================================= */}
+
+        {selectedFile && (
+
+          <div className="screen-workspace">
+
+
+            {/* IMAGE PANEL */}
+
+            <div className="image-workspace-card">
+
+              <div className="workspace-header">
+
+                <div>
+
+                  <div className="workspace-eyebrow">
+                    IMAGE INPUT
                   </div>
 
-                  <div>
-                    <span>SIZE</span>
-                    <strong>
-                      {(
-                        selectedFile.size /
-                        1024 /
-                        1024
-                      ).toFixed(2)}{" "}
-                      MB
-                    </strong>
-                  </div>
-
-                  <div>
-                    <span>SOURCE</span>
-                    <strong>
-                      {sourceLabel}
-                    </strong>
-                  </div>
+                  <h3>
+                    Captured oral image
+                  </h3>
 
                 </div>
 
                 <button
-                  type="button"
-                  className="analyze-button"
-                  onClick={analyzeImage}
-                  disabled={loading}
+                  className="icon-button"
+                  onClick={resetScreen}
+                  title="Remove image"
+                >
+                  <X size={17} />
+                </button>
+
+              </div>
+
+
+              <div className="image-preview-container">
+
+                {previewUrl && (
+                  <img
+                    src={previewUrl}
+                    alt="Selected oral image"
+                    className="image-preview"
+                  />
+                )}
+
+                <div className="preview-overlay">
+
+                  <div>
+                    <FileImage
+                      size={15}
+                    />
+
+                    <span>
+                      IMAGE READY
+                    </span>
+                  </div>
+
+                </div>
+
+              </div>
+
+
+              <div className="image-file-info">
+
+                <div>
+                  <FileImage size={14} />
+
+                  <span>
+                    {selectedFile.name}
+                  </span>
+                </div>
+
+                <span>
+                  {(
+                    selectedFile.size /
+                    1024 /
+                    1024
+                  ).toFixed(2)}{" "}
+                  MB
+                </span>
+
+              </div>
+
+            </div>
+
+
+            {/* CONTEXT PANEL */}
+
+            <div className="context-workspace-card">
+
+              <div className="workspace-header">
+
+                <div>
+
+                  <div className="workspace-eyebrow">
+                    RESEARCH CONTEXT
+                  </div>
+
+                  <h3>
+                    Case context
+                  </h3>
+
+                </div>
+
+                <button
+                  className={`context-toggle ${
+                    showContext
+                      ? "active"
+                      : ""
+                  }`}
+                  onClick={() =>
+                    setShowContext(
+                      !showContext
+                    )
+                  }
+                >
+                  {showContext
+                    ? "Close"
+                    : "Add context"}
+                </button>
+
+              </div>
+
+
+              <div className="location-section">
+
+                <div className="field-label">
+                  <MapPin size={13} />
+                  Lesion location
+                </div>
+
+                <select
+                  value={lesionLocation}
+                  onChange={(event) =>
+                    setLesionLocation(
+                      event.target.value
+                    )
+                  }
                 >
 
-                  {loading ? (
-                    <>
-                      <Loader2
-                        size={18}
-                        className="spin"
-                      />
-                      Analyzing image...
-                    </>
-                  ) : (
-                    <>
-                      Analyze image
-                      <ArrowRight size={18} />
-                    </>
+                  <option value="">
+                    Select location
+                  </option>
+
+                  {lesionLocations.map(
+                    (location) => (
+                      <option
+                        key={location}
+                        value={location}
+                      >
+                        {location}
+                      </option>
+                    )
                   )}
 
+                </select>
+
+              </div>
+
+
+              {showContext && (
+
+                <div className="context-form">
+
+
+                  <div className="form-grid">
+
+
+                    <label>
+
+                      <span>
+                        Age group
+                      </span>
+
+                      <select
+                        value={
+                          patientContext.ageGroup
+                        }
+                        onChange={(event) =>
+                          setPatientContext({
+                            ...patientContext,
+                            ageGroup:
+                              event.target.value,
+                          })
+                        }
+                      >
+
+                        <option value="">
+                          Not provided
+                        </option>
+
+                        <option>
+                          Under 18
+                        </option>
+
+                        <option>
+                          18–30
+                        </option>
+
+                        <option>
+                          31–45
+                        </option>
+
+                        <option>
+                          46–60
+                        </option>
+
+                        <option>
+                          61+
+                        </option>
+
+                      </select>
+
+                    </label>
+
+
+                    <label>
+
+                      <span>
+                        Tobacco exposure
+                      </span>
+
+                      <select
+                        value={
+                          patientContext.tobacco
+                        }
+                        onChange={(event) =>
+                          setPatientContext({
+                            ...patientContext,
+                            tobacco:
+                              event.target.value,
+                          })
+                        }
+                      >
+
+                        <option value="">
+                          Not provided
+                        </option>
+
+                        <option>
+                          Never
+                        </option>
+
+                        <option>
+                          Former
+                        </option>
+
+                        <option>
+                          Current
+                        </option>
+
+                      </select>
+
+                    </label>
+
+
+                    <label>
+
+                      <span>
+                        Alcohol exposure
+                      </span>
+
+                      <select
+                        value={
+                          patientContext.alcohol
+                        }
+                        onChange={(event) =>
+                          setPatientContext({
+                            ...patientContext,
+                            alcohol:
+                              event.target.value,
+                          })
+                        }
+                      >
+
+                        <option value="">
+                          Not provided
+                        </option>
+
+                        <option>
+                          None
+                        </option>
+
+                        <option>
+                          Occasional
+                        </option>
+
+                        <option>
+                          Regular
+                        </option>
+
+                      </select>
+
+                    </label>
+
+
+                    <label>
+
+                      <span>
+                        Previous oral lesion
+                      </span>
+
+                      <select
+                        value={
+                          patientContext.previousOralLesion
+                        }
+                        onChange={(event) =>
+                          setPatientContext({
+                            ...patientContext,
+                            previousOralLesion:
+                              event.target.value,
+                          })
+                        }
+                      >
+
+                        <option value="">
+                          Not provided
+                        </option>
+
+                        <option>
+                          Yes
+                        </option>
+
+                        <option>
+                          No
+                        </option>
+
+                      </select>
+
+                    </label>
+
+
+                    <label>
+
+                      <span>
+                        Previous oral cancer
+                      </span>
+
+                      <select
+                        value={
+                          patientContext.previousOralCancer
+                        }
+                        onChange={(event) =>
+                          setPatientContext({
+                            ...patientContext,
+                            previousOralCancer:
+                              event.target.value,
+                          })
+                        }
+                      >
+
+                        <option value="">
+                          Not provided
+                        </option>
+
+                        <option>
+                          Yes
+                        </option>
+
+                        <option>
+                          No
+                        </option>
+
+                      </select>
+
+                    </label>
+
+
+                    <label>
+
+                      <span>
+                        Symptom duration
+                      </span>
+
+                      <select
+                        value={
+                          patientContext.symptomDuration
+                        }
+                        onChange={(event) =>
+                          setPatientContext({
+                            ...patientContext,
+                            symptomDuration:
+                              event.target.value,
+                          })
+                        }
+                      >
+
+                        <option value="">
+                          Not provided
+                        </option>
+
+                        <option>
+                          Less than 1 week
+                        </option>
+
+                        <option>
+                          1–2 weeks
+                        </option>
+
+                        <option>
+                          2–4 weeks
+                        </option>
+
+                        <option>
+                          More than 1 month
+                        </option>
+
+                        <option>
+                          Not sure
+                        </option>
+
+                      </select>
+
+                    </label>
+
+                  </div>
+
+
+                  <div className="symptom-block">
+
+                    <div className="field-label">
+                      Symptoms
+                    </div>
+
+                    <div className="symptom-grid">
+
+                      {symptomOptions.map(
+                        (symptom) => {
+
+                          const active =
+                            patientContext.symptoms.includes(
+                              symptom
+                            );
+
+                          return (
+                            <button
+                              key={symptom}
+                              type="button"
+                              className={`symptom-chip ${
+                                active
+                                  ? "active"
+                                  : ""
+                              }`}
+                              onClick={() =>
+                                toggleSymptom(
+                                  symptom
+                                )
+                              }
+                            >
+                              {active && (
+                                <CheckCircle2
+                                  size={13}
+                                />
+                              )}
+
+                              {symptom}
+                            </button>
+                          );
+
+                        }
+                      )}
+
+                    </div>
+
+                  </div>
+
+
+                  <label className="notes-field">
+
+                    <span>
+                      Additional notes
+                    </span>
+
+                    <textarea
+                      value={
+                        patientContext.notes
+                      }
+                      onChange={(event) =>
+                        setPatientContext({
+                          ...patientContext,
+                          notes:
+                            event.target.value,
+                        })
+                      }
+                      placeholder="Optional research notes..."
+                      rows={3}
+                    />
+
+                  </label>
+
+
+                  <div className="context-warning">
+
+                    <Info size={14} />
+
+                    <span>
+                      Patient context is user-reported
+                      research information. It does not
+                      change the MobileNet prediction.
+                    </span>
+
+                  </div>
+
+                </div>
+
+              )}
+
+
+              <button
+                className="analyze-button"
+                onClick={analyzeImage}
+                disabled={isAnalyzing}
+              >
+
+                {isAnalyzing ? (
+                  <>
+                    <span className="button-spinner"></span>
+
+                    Analyzing image...
+                  </>
+                ) : (
+                  <>
+                    <BrainCircuit size={18} />
+
+                    Analyze with CancerLense
+
+                    <ChevronRight
+                      size={16}
+                    />
+                  </>
+                )}
+
+              </button>
+
+
+              <button
+                className="secondary-action"
+                onClick={resetScreen}
+                disabled={isAnalyzing}
+              >
+                <RotateCcw size={14} />
+                Choose another image
+              </button>
+
+            </div>
+
+          </div>
+
+        )}
+
+
+        {/* =================================================
+            ERROR
+        ================================================= */}
+
+        {errorMessage && (
+
+          <div className="error-box">
+
+            <AlertTriangle size={18} />
+
+            <div>
+
+              <strong>
+                Analysis issue
+              </strong>
+
+              <span>
+                {errorMessage}
+              </span>
+
+            </div>
+
+            <button
+              onClick={() =>
+                setErrorMessage("")
+              }
+            >
+              <X size={15} />
+            </button>
+
+          </div>
+
+        )}
+
+
+        {/* =================================================
+            RESULTS
+        ================================================= */}
+
+        {analysisResult && (
+
+          <div className="results-section">
+
+
+            {/* RESULT HEADER */}
+
+            <div className="results-header">
+
+              <div>
+
+                <div className="screen-eyebrow">
+                  CANCERLENSE / ANALYSIS COMPLETE
+                </div>
+
+                <h2>
+                  Research screening result
+                </h2>
+
+                <p>
+                  The following values are outputs
+                  from the current research model
+                  and image-processing pipeline.
+                </p>
+
+              </div>
+
+
+              <div className="result-actions">
+
+                <button
+                  className="secondary-action"
+                  onClick={resetScreen}
+                >
+                  <RotateCcw size={14} />
+                  New analysis
                 </button>
 
               </div>
 
             </div>
 
-          )}
 
-          {error && (
+            {/* PRIMARY RESULT */}
 
-            <div className="error-message">
+            <div className="result-main-grid">
 
-              <CircleAlert size={17} />
-
-              <span>
-                {error}
-              </span>
-
-            </div>
-
-          )}
-
-        </section>
-
-        {/* ====================================================
-            CASE CONTEXT
-            ==================================================== */}
-
-        <section className="case-context-strip">
-
-          <div className="case-context-copy">
-
-            <div className="case-context-icon">
-              <UserRound size={18} />
-            </div>
-
-            <div>
-
-              <span>
-                OPTIONAL / CASE CONTEXT
-              </span>
-
-              <h3>
-                Add patient history &amp; symptoms
-              </h3>
-
-              <p>
-                Add research context without changing
-                the image model prediction.
-              </p>
-
-            </div>
-
-          </div>
-
-          <button
-            type="button"
-            className="context-launch-button"
-            onClick={() =>
-              setShowPatientContext(true)
-            }
-          >
-
-            <UserRound size={15} />
-
-            {patientContext.symptoms?.length ||
-            patientContext.ageGroup ||
-            patientContext.tobaccoExposure
-              ? "Edit Case Context"
-              : "Add Case Context"}
-
-          </button>
-
-        </section>
-
-        {/* ====================================================
-            RESULTS
-            ==================================================== */}
-
-        {result && (
-
-          <section className="results-section">
-
-            <div className="result-header">
-
-              <div>
-
-                <span className="section-kicker">
-                  02 / SCREENING OUTPUT
-                </span>
-
-                <h2>
-                  Analysis complete.
-                </h2>
-
-                <p>
-                  The following output is generated by
-                  the CancerLense research screening
-                  pipeline.
-                </p>
-
-              </div>
-
-              <button
-                type="button"
-                className="reset-button"
-                onClick={resetCase}
-              >
-                <RefreshCcw size={15} />
-                New analysis
-              </button>
-
-            </div>
-
-            {/* STATUS */}
-
-            <div className="result-summary-grid">
-
-              <div className="result-summary-card">
-
-                <div className="result-summary-icon">
-                  <CheckCircle2 size={19} />
-                </div>
-
-                <div>
-                  <span>STATUS</span>
-                  <strong>
-                    {result.status ||
-                      "ANALYZED"}
-                  </strong>
-                </div>
-
-              </div>
-
-              <div className="result-summary-card">
-
-                <div className="result-summary-icon">
-                  <ScanSearch size={19} />
-                </div>
-
-                <div>
-                  <span>QUALITY</span>
-                  <strong>
-                    {result.quality
-                      ?.quality_status ||
-                      "ASSESSED"}
-                  </strong>
-                </div>
-
-              </div>
-
-              <div className="result-summary-card">
-
-                <div className="result-summary-icon">
-                  <Clock3 size={19} />
-                </div>
-
-                <div>
-                  <span>SOURCE</span>
-                  <strong>
-                    {sourceLabel}
-                  </strong>
-                </div>
-
-              </div>
-
-            </div>
-
-            {/* TIMELINE */}
-
-            <div className="analysis-timeline-panel">
-
-              <div className="panel-heading">
-
-                <div>
-
-                  <span className="section-kicker">
-                    ANALYSIS PIPELINE
-                  </span>
-
-                  <h3>
-                    What CancerLense processed
-                  </h3>
-
-                </div>
-
-              </div>
-
-              <div className="analysis-timeline">
-
-                {timeline.map((item, index) => {
-
-                  const Icon = item.icon;
-
-                  return (
-                    <div
-                      className={`timeline-item ${
-                        item.complete
-                          ? "timeline-complete"
-                          : ""
-                      }`}
-                      key={item.title}
-                    >
-
-                      <div className="timeline-marker">
-
-                        {item.complete ? (
-                          <CheckCircle2 size={17} />
-                        ) : (
-                          <Icon size={17} />
-                        )}
-
-                      </div>
-
-                      <div className="timeline-content">
-
-                        <span>
-                          0{index + 1}
-                        </span>
-
-                        <div>
-
-                          <strong>
-                            {item.title}
-                          </strong>
-
-                          <p>
-                            {item.detail}
-                          </p>
-
-                        </div>
-
-                      </div>
-
-                    </div>
-                  );
-                })}
-
-              </div>
-
-            </div>
-
-            {/* AI FINDINGS */}
-
-            <div className="ai-findings-panel">
-
-              <div className="panel-heading">
-
-                <div>
-
-                  <span className="section-kicker">
-                    AI FINDINGS
-                  </span>
-
-                  <h3>
-                    Screening signal
-                  </h3>
-
-                </div>
-
-                <Sparkles size={19} />
-
-              </div>
-
-              <div className="ai-finding-main">
-
-                <div
-                  className={`finding-status ${
-                    isCancer
-                      ? "finding-cancer"
-                      : isNonCancer
-                        ? "finding-noncancer"
-                        : ""
-                  }`}
-                >
-
-                  <div className="finding-status-dot" />
-
-                  <span>
-                    {result.screening_signal ||
-                      "MODEL SCREENING SIGNAL"}
-                  </span>
-
-                </div>
-
-                <p>
-                  CancerLense identified a
-                  model-class signal from the
-                  submitted image.
-                </p>
-
-              </div>
-
-            </div>
-
-            {/* RED FLAGS */}
-
-            <RedFlagPanel
-              patientContext={patientContext}
-            />
-
-            {/* PREDICTION */}
-
-            <div className="prediction-card">
-
-              <div className="prediction-card-header">
-
-                <div>
-
-                  <span className="section-kicker">
-                    MODEL OUTPUT
-                  </span>
-
-                  <h3>
-                    Predicted class
-                  </h3>
-
-                </div>
-
-                <span className="prediction-model">
-                  MobileNetV3 Small
-                </span>
-
-              </div>
 
               <div
-                className={`prediction-result ${
-                  isCancer
-                    ? "prediction-cancer"
-                    : isNonCancer
-                      ? "prediction-noncancer"
-                      : ""
+                className={`primary-result-card ${
+                  getSignalClass()
                 }`}
               >
 
-                <div>
+                <div className="result-card-top">
 
                   <span>
-                    SCREENING CLASS
+                    SCREENING SIGNAL
                   </span>
 
-                  <strong>
-                    {predictionClass
-                      ? predictionClass
-                          .replace("_", " ")
-                          .toUpperCase()
-                      : "UNKNOWN"}
-                  </strong>
+                  <Sparkles size={17} />
 
                 </div>
 
-                <div className="confidence-block">
+
+                <div className="result-signal">
+
+                  {analysisResult.prediction_class ===
+                  "cancer"
+                    ? "CANCER-CLASS SIGNAL"
+                    : "NON-CANCER-CLASS SIGNAL"}
+
+                </div>
+
+
+                <div className="confidence-row">
+
+                  <div>
+
+                    <span>
+                      MODEL CONFIDENCE
+                    </span>
+
+                    <strong>
+                      {formatNumber(
+                        analysisResult.model_confidence
+                      )}
+                      %
+                    </strong>
+
+                  </div>
+
+
+                  <div className="confidence-ring">
+
+                    <div
+                      className="confidence-ring-inner"
+                      style={{
+                        "--confidence":
+                          `${Math.min(
+                            100,
+                            Number(
+                              analysisResult.model_confidence ||
+                                0
+                            )
+                          ) * 3.6}deg`,
+                      }}
+                    >
+                      <span>
+                        {Math.round(
+                          Number(
+                            analysisResult.model_confidence ||
+                              0
+                          )
+                        )}
+                      </span>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+
+                <div className="result-disclaimer">
+
+                  <Info size={14} />
 
                   <span>
-                    MODEL CONFIDENCE
+                    Model confidence is not clinical
+                    certainty or a diagnosis.
                   </span>
-
-                  <strong>
-                    {confidence.toFixed(2)}%
-                  </strong>
 
                 </div>
 
               </div>
 
-              <div className="class-scores">
 
-                <div className="score-row">
+              {/* CLASS SCORES */}
 
-                  <div className="score-label">
+              <div className="scores-card">
 
-                    <span>
-                      Cancer class
-                    </span>
+                <div className="result-card-top">
 
-                    <strong>
-                      {cancerScore.toFixed(2)}%
-                    </strong>
+                  <span>
+                    CLASS SCORES
+                  </span>
+
+                  <BarChart3 size={17} />
+
+                </div>
+
+
+                <div className="score-list">
+
+
+                  <div className="score-item">
+
+                    <div className="score-label">
+
+                      <span>
+                        Cancer
+                      </span>
+
+                      <strong>
+                        {formatNumber(
+                          analysisResult
+                            .class_scores
+                            ?.cancer
+                        )}
+                        %
+                      </strong>
+
+                    </div>
+
+                    <div className="score-track">
+
+                      <div
+                        className="score-fill cancer-fill"
+                        style={{
+                          width: `${
+                            Math.min(
+                              100,
+                              Number(
+                                analysisResult
+                                  .class_scores
+                                  ?.cancer || 0
+                              )
+                            )
+                          }%`,
+                        }}
+                      />
+
+                    </div>
 
                   </div>
 
-                  <div className="score-track">
 
-                    <div
-                      className="score-fill score-cancer"
-                      style={{
-                        width: `${Math.min(
-                          cancerScore,
-                          100
-                        )}%`,
-                      }}
-                    />
+                  <div className="score-item">
+
+                    <div className="score-label">
+
+                      <span>
+                        Non-cancer
+                      </span>
+
+                      <strong>
+                        {formatNumber(
+                          analysisResult
+                            .class_scores
+                            ?.non_cancer
+                        )}
+                        %
+                      </strong>
+
+                    </div>
+
+                    <div className="score-track">
+
+                      <div
+                        className="score-fill neutral-fill"
+                        style={{
+                          width: `${
+                            Math.min(
+                              100,
+                              Number(
+                                analysisResult
+                                  .class_scores
+                                  ?.non_cancer || 0
+                              )
+                            )
+                          }%`,
+                        }}
+                      />
+
+                    </div>
 
                   </div>
 
                 </div>
 
-                <div className="score-row">
 
-                  <div className="score-label">
-
-                    <span>
-                      Non-cancer class
-                    </span>
-
-                    <strong>
-                      {nonCancerScore.toFixed(2)}%
-                    </strong>
-
-                  </div>
-
-                  <div className="score-track">
-
-                    <div
-                      className="score-fill score-noncancer"
-                      style={{
-                        width: `${Math.min(
-                          nonCancerScore,
-                          100
-                        )}%`,
-                      }}
-                    />
-
-                  </div>
-
+                <div className="score-note">
+                  Scores represent the model's
+                  class outputs for this image.
                 </div>
 
               </div>
 
             </div>
 
-            {/* QUALITY + RECOMMENDATION */}
 
-            <div className="result-two-column">
+            {/* =================================================
+                QUALITY + IMAGE
+            ================================================= */}
+
+            <div className="analysis-grid">
+
+
+              <div className="result-panel">
+
+                <div className="panel-heading">
+
+                  <div>
+                    <div className="panel-eyebrow">
+                      IMAGE QUALITY
+                    </div>
+
+                    <h3>
+                      Capture assessment
+                    </h3>
+                  </div>
+
+                  <div
+                    className={`status-pill ${
+                      getQualityClass()
+                    }`}
+                  >
+                    {analysisResult.quality
+                      ?.quality_status ||
+                      "UNKNOWN"}
+                  </div>
+
+                </div>
+
+
+                <div className="metric-grid">
+
+                  <div className="metric-box">
+                    <span>
+                      WIDTH
+                    </span>
+
+                    <strong>
+                      {
+                        analysisResult
+                          .quality?.width ||
+                        "—"
+                      }
+                      <small> px</small>
+                    </strong>
+                  </div>
+
+
+                  <div className="metric-box">
+                    <span>
+                      HEIGHT
+                    </span>
+
+                    <strong>
+                      {
+                        analysisResult
+                          .quality?.height ||
+                        "—"
+                      }
+                      <small> px</small>
+                    </strong>
+                  </div>
+
+
+                  <div className="metric-box">
+                    <span>
+                      BRIGHTNESS
+                    </span>
+
+                    <strong>
+                      {formatNumber(
+                        analysisResult
+                          .quality?.brightness
+                      )}
+                    </strong>
+                  </div>
+
+
+                  <div className="metric-box">
+                    <span>
+                      SHARPNESS
+                    </span>
+
+                    <strong>
+                      {formatNumber(
+                        analysisResult
+                          .quality?.sharpness
+                      )}
+                    </strong>
+                  </div>
+
+                </div>
+
+              </div>
+
+
+              {/* GRAD CAM */}
+
+              <div className="result-panel gradcam-panel">
+
+                <div className="panel-heading">
+
+                  <div>
+                    <div className="panel-eyebrow">
+                      EXPLAINABILITY
+                    </div>
+
+                    <h3>
+                      Grad-CAM evidence
+                    </h3>
+                  </div>
+
+                  <Eye size={17} />
+
+                </div>
+
+
+                {getGradcamUrl() ? (
+
+                  <div className="gradcam-image-wrapper">
+
+                    <img
+                      src={getGradcamUrl()}
+                      alt="Grad-CAM visualization"
+                      className="gradcam-image"
+                    />
+
+                    <div className="gradcam-label">
+                      MODEL ATTENTION VISUALIZATION
+                    </div>
+
+                  </div>
+
+                ) : (
+
+                  <div className="empty-visual">
+
+                    <Eye size={25} />
+
+                    <span>
+                      Grad-CAM image unavailable
+                    </span>
+
+                  </div>
+
+                )}
+
+
+                <p className="panel-note">
+                  Grad-CAM highlights image regions
+                  that contributed to the model's
+                  prediction. It is not a clinical
+                  lesion boundary or diagnosis.
+                </p>
+
+              </div>
+
+            </div>
+
+
+            {/* =================================================
+                LESION MEASUREMENT
+            ================================================= */}
+
+            <div className="result-panel measurement-panel">
+
+              <div className="panel-heading">
+
+                <div>
+
+                  <div className="panel-eyebrow">
+                    IMAGE ANALYSIS
+                  </div>
+
+                  <h3>
+                    Lesion measurement
+                  </h3>
+
+                </div>
+
+                <Ruler size={18} />
+
+              </div>
+
+
+              {analysisResult.lesion_measurement ? (
+
+                <div className="measurement-content">
+
+                  <div className="measurement-status">
+
+                    <CheckCircle2 size={17} />
+
+                    <span>
+                      {
+                        analysisResult
+                          .lesion_measurement
+                          .status ||
+                        "ESTIMATED"
+                      }
+                    </span>
+
+                  </div>
+
+
+                  <div className="measurement-grid">
+
+                    <div className="measurement-box">
+
+                      <span>
+                        WIDTH
+                      </span>
+
+                      <strong>
+                        {
+                          analysisResult
+                            .lesion_measurement
+                            .width_pixels ??
+                          "—"
+                        }
+
+                        <small>
+                          px
+                        </small>
+                      </strong>
+
+                    </div>
+
+
+                    <div className="measurement-box">
+
+                      <span>
+                        HEIGHT
+                      </span>
+
+                      <strong>
+                        {
+                          analysisResult
+                            .lesion_measurement
+                            .height_pixels ??
+                          "—"
+                        }
+
+                        <small>
+                          px
+                        </small>
+                      </strong>
+
+                    </div>
+
+
+                    <div className="measurement-box">
+
+                      <span>
+                        AREA
+                      </span>
+
+                      <strong>
+                        {
+                          formatNumber(
+                            analysisResult
+                              .lesion_measurement
+                              .area_pixels
+                          )
+                        }
+
+                        <small>
+                          px²
+                        </small>
+                      </strong>
+
+                    </div>
+
+
+                    <div className="measurement-box">
+
+                      <span>
+                        CALIBRATION
+                      </span>
+
+                      <strong>
+                        {analysisResult
+                          .lesion_measurement
+                          .calibration_available
+                          ? "AVAILABLE"
+                          : "NOT AVAILABLE"}
+                      </strong>
+
+                    </div>
+
+                  </div>
+
+
+                  <div className="measurement-note">
+
+                    <Info size={14} />
+
+                    <span>
+                      {
+                        analysisResult
+                          .lesion_measurement
+                          .note ||
+                        "Physical dimensions require a valid image calibration reference."
+                      }
+                    </span>
+
+                  </div>
+
+                </div>
+
+              ) : (
+
+                <div className="measurement-unavailable">
+
+                  <Ruler size={22} />
+
+                  <div>
+
+                    <strong>
+                      Image-based measurement
+                    </strong>
+
+                    <span>
+                      No lesion measurement was returned
+                      by the current API response.
+                    </span>
+
+                  </div>
+
+                </div>
+
+              )}
+
+            </div>
+
+
+            {/* =================================================
+                CONTEXT FLAGS
+            ================================================= */}
+
+            <div className="analysis-grid">
+
 
               <div className="result-panel">
 
@@ -1460,57 +2350,70 @@ function App() {
 
                   <div>
 
-                    <span className="section-kicker">
-                      IMAGE QUALITY
-                    </span>
+                    <div className="panel-eyebrow">
+                      RESEARCH CONTEXT
+                    </div>
 
                     <h3>
-                      Input assessment
+                      Case profile
                     </h3>
 
                   </div>
 
-                  <ScanSearch size={18} />
+                  <UserRound size={17} />
 
                 </div>
 
-                <div className="quality-grid">
+
+                <div className="case-profile-list">
 
                   <div>
-                    <span>WIDTH</span>
+                    <span>
+                      LESION LOCATION
+                    </span>
+
                     <strong>
-                      {result.quality?.width ||
-                        "—"}{" "}
-                      px
+                      {lesionLocation ||
+                        "Not specified"}
                     </strong>
                   </div>
 
+
                   <div>
-                    <span>HEIGHT</span>
+                    <span>
+                      SYMPTOMS
+                    </span>
+
                     <strong>
-                      {result.quality?.height ||
-                        "—"}{" "}
-                      px
+                      {
+                        patientContext.symptoms
+                          .length
+                      }{" "}
+                      reported
                     </strong>
                   </div>
 
+
                   <div>
-                    <span>BRIGHTNESS</span>
+                    <span>
+                      TOBACCO
+                    </span>
+
                     <strong>
-                      {Number(
-                        result.quality
-                          ?.brightness || 0
-                      ).toFixed(2)}
+                      {patientContext.tobacco ||
+                        "Not provided"}
                     </strong>
                   </div>
 
+
                   <div>
-                    <span>SHARPNESS</span>
+                    <span>
+                      ALCOHOL
+                    </span>
+
                     <strong>
-                      {Number(
-                        result.quality
-                          ?.sharpness || 0
-                      ).toFixed(2)}
+                      {patientContext.alcohol ||
+                        "Not provided"}
                     </strong>
                   </div>
 
@@ -1518,438 +2421,139 @@ function App() {
 
               </div>
 
-              <div className="result-panel recommendation-panel">
+
+              <div className="result-panel">
 
                 <div className="panel-heading">
 
                   <div>
 
-                    <span className="section-kicker">
-                      NEXT STEP
-                    </span>
+                    <div className="panel-eyebrow">
+                      REVIEW PROMPTS
+                    </div>
 
                     <h3>
-                      Research interpretation
+                      Context flags
                     </h3>
 
                   </div>
 
-                  <AlertCircle size={18} />
+                  <AlertTriangle size={17} />
 
                 </div>
 
-                <p>
-                  {result.recommendation}
+
+                {contextFlags.length > 0 ? (
+
+                  <div className="flag-list">
+
+                    {contextFlags.map(
+                      (flag, index) => (
+
+                        <div
+                          className="flag-item"
+                          key={`${flag}-${index}`}
+                        >
+
+                          <AlertTriangle
+                            size={14}
+                          />
+
+                          <span>
+                            {flag}
+                          </span>
+
+                        </div>
+
+                      )
+                    )}
+
+                  </div>
+
+                ) : (
+
+                  <div className="no-flags">
+
+                    <CheckCircle2 size={17} />
+
+                    <span>
+                      No additional context flags
+                      were entered.
+                    </span>
+
+                  </div>
+
+                )}
+
+
+                <p className="panel-note">
+                  These are user-reported research
+                  context prompts. They do not alter
+                  the model prediction.
                 </p>
 
               </div>
 
             </div>
 
-            {/* EXPLAINABILITY */}
 
-            <div className="gradcam-card">
+            {/* =================================================
+                RECOMMENDATION
+            ================================================= */}
 
-              <div className="panel-heading">
+            <div className="recommendation-card">
 
-                <div>
+              <div className="recommendation-icon">
 
-                  <span className="section-kicker">
-                    EXPLAINABILITY
-                  </span>
-
-                  <h3>
-                    Where did the model look?
-                  </h3>
-
-                  <p>
-                    Grad-CAM highlights image
-                    regions that influenced the
-                    model prediction. It is not a
-                    clinical lesion boundary.
-                  </p>
-
-                </div>
-
-                <Microscope size={19} />
+                <Stethoscope size={21} />
 
               </div>
 
-              {gradcamUrl ? (
-                <>
 
-                  <div className="explainability-tabs">
+              <div>
 
-                    <button
-                      type="button"
-                      className={
-                        activeExplainability ===
-                        "original"
-                          ? "active"
-                          : ""
-                      }
-                      onClick={() =>
-                        setActiveExplainability(
-                          "original"
-                        )
-                      }
-                    >
-                      Original
-                    </button>
-
-                    <button
-                      type="button"
-                      className={
-                        activeExplainability ===
-                        "attention"
-                          ? "active"
-                          : ""
-                      }
-                      onClick={() =>
-                        setActiveExplainability(
-                          "attention"
-                        )
-                      }
-                    >
-                      Attention
-                    </button>
-
-                    <button
-                      type="button"
-                      className={
-                        activeExplainability ===
-                        "blend"
-                          ? "active"
-                          : ""
-                      }
-                      onClick={() =>
-                        setActiveExplainability(
-                          "blend"
-                        )
-                      }
-                    >
-                      Blend
-                    </button>
-
-                  </div>
-
-                  <div className="explainability-viewer">
-
-                    {activeExplainability ===
-                      "original" && (
-                      <img
-                        src={previewUrl}
-                        alt="Original submitted image"
-                        className="explainability-image"
-                      />
-                    )}
-
-                    {activeExplainability ===
-                      "attention" && (
-                      <img
-                        src={gradcamUrl}
-                        alt="Grad-CAM attention map"
-                        className="explainability-image"
-                      />
-                    )}
-
-                    {activeExplainability ===
-                      "blend" && (
-                      <div className="blend-view">
-
-                        <img
-                          src={previewUrl}
-                          alt="Original submitted image"
-                          className="explainability-image"
-                        />
-
-                        <img
-                          src={gradcamUrl}
-                          alt="Grad-CAM overlay"
-                          className="explainability-image blend-overlay"
-                        />
-
-                      </div>
-                    )}
-
-                  </div>
-
-                </>
-              ) : (
-                <div className="gradcam-status">
-
-                  <Info size={17} />
-
-                  Explainability output was not
-                  generated for this case.
-
+                <div className="panel-eyebrow">
+                  NEXT STEP
                 </div>
-              )}
+
+                <h3>
+                  Model recommendation
+                </h3>
+
+                <p>
+                  {analysisResult.recommendation ||
+                    "No recommendation returned by the API."}
+                </p>
+
+              </div>
 
             </div>
 
-            {/* RESEARCH NOTE */}
 
-            <div className="research-note">
+            {/* =================================================
+                DISCLAIMER
+            ================================================= */}
 
-              <Info size={18} />
+            <div className="medical-disclaimer">
+
+              <ShieldCheck size={18} />
 
               <div>
 
                 <strong>
-                  Research-only interpretation
+                  Research-only output
                 </strong>
 
                 <p>
-                  CancerLense provides AI-assisted
-                  image screening signals for
-                  research purposes. Model confidence
-                  is not clinical certainty. The output
-                  does not establish a diagnosis.
-                  Professional clinical assessment
-                  remains separate from this research
-                  result.
+                  CancerLense is an AI-assisted
+                  research screening prototype.
+                  Its image prediction, confidence
+                  score, class scores and Grad-CAM
+                  visualization are model outputs,
+                  not a medical diagnosis. Professional
+                  clinical evaluation remains separate
+                  from this system.
                 </p>
-
-              </div>
-
-            </div>
-
-          </section>
-
-        )}
-
-      </main>
-
-      {/* ======================================================
-          FOOTER
-          ====================================================== */}
-
-      <footer className="app-footer">
-
-        <div>
-
-          <strong>
-            CANCERLENSE
-          </strong>
-
-          <span>
-            AI-assisted oral image screening
-            research prototype.
-          </span>
-
-        </div>
-
-        <span>
-          NOT A MEDICAL DIAGNOSIS
-        </span>
-
-      </footer>
-
-      {/* ======================================================
-          CAMERA MODAL
-          ====================================================== */}
-
-      {cameraOpen && (
-
-        <div className="camera-overlay">
-
-          <div className="camera-modal">
-
-            <div className="camera-modal-header">
-
-              <div>
-
-                <span className="section-kicker">
-                  CANCERLENSE / CAMERA
-                </span>
-
-                <h2>
-                  Capture research image
-                </h2>
-
-                <p>
-                  Position the area clearly inside
-                  the frame before capturing.
-                </p>
-
-              </div>
-
-              <button
-                type="button"
-                className="camera-close-button"
-                onClick={closeCamera}
-                aria-label="Close camera"
-              >
-                <X size={19} />
-              </button>
-
-            </div>
-
-            <div className="camera-stage">
-
-              {!capturedPreview ? (
-                <>
-
-                  <video
-                    ref={videoRef}
-                    className="camera-video"
-                    autoPlay
-                    playsInline
-                    muted
-                  />
-
-                  <div className="camera-frame">
-
-                    <span className="camera-corner camera-corner-tl" />
-                    <span className="camera-corner camera-corner-tr" />
-                    <span className="camera-corner camera-corner-bl" />
-                    <span className="camera-corner camera-corner-br" />
-
-                    <div className="camera-frame-label">
-                      POSITION IMAGE INSIDE FRAME
-                    </div>
-
-                  </div>
-
-                  {!cameraReady &&
-                    !cameraError && (
-                      <div className="camera-loading">
-
-                        <Loader2
-                          size={27}
-                          className="spin"
-                        />
-
-                        <span>
-                          Starting camera...
-                        </span>
-
-                      </div>
-                    )}
-
-                  {cameraError && (
-
-                    <div className="camera-error">
-
-                      <AlertCircle size={22} />
-
-                      <p>
-                        {cameraError}
-                      </p>
-
-                      <button
-                        type="button"
-                        onClick={startCamera}
-                      >
-                        Try again
-                      </button>
-
-                    </div>
-
-                  )}
-
-                </>
-              ) : (
-
-                <div className="camera-captured">
-
-                  <img
-                    src={capturedPreview}
-                    alt="Captured camera preview"
-                  />
-
-                  <div className="captured-label">
-
-                    <CheckCircle2 size={16} />
-
-                    PHOTO CAPTURED
-
-                  </div>
-
-                </div>
-
-              )}
-
-            </div>
-
-            <canvas
-              ref={canvasRef}
-              style={{
-                display: "none",
-              }}
-            />
-
-            <div className="camera-modal-footer">
-
-              <div className="camera-source-info">
-
-                <Camera size={16} />
-
-                <span>
-                  Camera images are processed
-                  through the same CancerLense
-                  analysis pipeline.
-                </span>
-
-              </div>
-
-              <div className="camera-actions">
-
-                {!capturedPreview ? (
-                  <>
-
-                    <button
-                      type="button"
-                      className="camera-secondary-button"
-                      onClick={closeCamera}
-                    >
-                      Cancel
-                    </button>
-
-                    <button
-                      type="button"
-                      className="camera-capture-button"
-                      onClick={capturePhoto}
-                      disabled={!cameraReady}
-                    >
-
-                      <Camera size={18} />
-
-                      Capture Photo
-
-                    </button>
-
-                  </>
-                ) : (
-                  <>
-
-                    <button
-                      type="button"
-                      className="camera-secondary-button"
-                      onClick={retakePhoto}
-                    >
-
-                      <RefreshCcw size={16} />
-
-                      Retake
-
-                    </button>
-
-                    <button
-                      type="button"
-                      className="camera-capture-button"
-                      onClick={useCapturedPhoto}
-                    >
-
-                      <CheckCircle2 size={17} />
-
-                      Use This Photo
-
-                    </button>
-
-                  </>
-                )}
 
               </div>
 
@@ -1957,27 +2561,407 @@ function App() {
 
           </div>
 
+        )}
+
+      </section>
+    );
+  };
+
+
+  /* =======================================================
+     PLACEHOLDER
+  ======================================================= */
+
+  const renderPlaceholder = () => {
+
+    const current =
+      navigation.find(
+        (item) =>
+          item.label === activePage
+      );
+
+    const Icon =
+      current?.icon || ScanLine;
+
+
+    return (
+      <section className="placeholder-page">
+
+        <div className="placeholder-icon">
+
+          <Icon
+            size={30}
+            strokeWidth={1.5}
+          />
+
+        </div>
+
+
+        <div className="placeholder-label">
+          CANCERLENSE /{" "}
+          {activePage.toUpperCase()}
+        </div>
+
+
+        <h2>
+          {pageTitles[activePage]}
+        </h2>
+
+
+        <p>
+          This module will be connected
+          to the CancerLense research
+          workflow next.
+        </p>
+
+
+        <button
+          className="placeholder-button"
+          onClick={() =>
+            setActivePage("Dashboard")
+          }
+        >
+          Back to Dashboard
+        </button>
+
+      </section>
+    );
+  };
+
+
+  /* =======================================================
+     RENDER
+  ======================================================= */
+
+  return (
+
+    <div className="app-shell">
+
+
+      {/* =================================================
+          TOPBAR
+      ================================================= */}
+
+      <header className="topbar">
+
+        <div className="brand">
+
+          <div className="brand-mark">
+
+            <ScanLine
+              size={20}
+              strokeWidth={1.8}
+            />
+
+          </div>
+
+
+          <div className="brand-text">
+
+            <div className="brand-name">
+              Cancer<span>Lense</span>
+            </div>
+
+            <div className="brand-subtitle">
+              AI RESEARCH PROTOTYPE
+            </div>
+
+          </div>
+
+        </div>
+
+
+        <div className="topbar-right">
+
+          <div className="system-status">
+
+            <span className="status-dot"></span>
+
+            <span>
+              Online
+            </span>
+
+          </div>
+
+
+          <button
+            className="profile-button"
+            aria-label="Profile"
+          >
+
+            <CircleUserRound
+              size={19}
+              strokeWidth={1.7}
+            />
+
+          </button>
+
+        </div>
+
+      </header>
+
+
+      {/* =================================================
+          APPLICATION LAYOUT
+      ================================================= */}
+
+      <div className="application-layout">
+
+
+        {/* =================================================
+            SIDEBAR
+        ================================================= */}
+
+        <aside className="sidebar">
+
+          <div className="sidebar-navigation">
+
+            {navigation.map(
+              (item) => {
+
+                const Icon =
+                  item.icon;
+
+                return (
+
+                  <button
+                    key={item.label}
+                    className={`sidebar-item ${
+                      activePage ===
+                      item.label
+                        ? "active"
+                        : ""
+                    }`}
+                    onClick={() =>
+                      setActivePage(
+                        item.label
+                      )
+                    }
+                  >
+
+                    <Icon
+                      size={18}
+                      strokeWidth={1.8}
+                    />
+
+                    <span>
+                      {item.label}
+                    </span>
+
+
+                    {activePage ===
+                      item.label && (
+
+                      <ChevronRight
+                        size={14}
+                        className="sidebar-arrow"
+                      />
+
+                    )}
+
+                  </button>
+
+                );
+
+              }
+            )}
+
+          </div>
+
+
+          <div className="sidebar-footer">
+
+            <div className="privacy-box">
+
+              <ShieldCheck
+                size={18}
+                strokeWidth={1.7}
+              />
+
+              <div>
+
+                <strong>
+                  Research Mode
+                </strong>
+
+                <span>
+                  AI-assisted screening only
+                </span>
+
+              </div>
+
+            </div>
+
+
+            <div className="version">
+              CancerLense v0.1
+            </div>
+
+          </div>
+
+        </aside>
+
+
+        {/* =================================================
+            MAIN
+        ================================================= */}
+
+        <main className="main-content">
+
+
+          <section className="page-header">
+
+            <div>
+
+              <div className="eyebrow">
+                CANCERLENSE /{" "}
+                {activePage.toUpperCase()}
+              </div>
+
+              <h1>
+                {pageTitles[activePage]}
+              </h1>
+
+              <p>
+                AI-assisted oral image screening
+                research environment.
+              </p>
+
+            </div>
+
+
+            <div className="page-status">
+
+              <Activity
+                size={17}
+              />
+
+              <span>
+                SYSTEM READY
+              </span>
+
+            </div>
+
+          </section>
+
+
+          {activePage ===
+            "Dashboard" &&
+            renderDashboard()}
+
+
+          {activePage ===
+            "Screen" &&
+            renderScreen()}
+
+
+          {activePage !== "Dashboard" &&
+            activePage !== "Screen" &&
+            renderPlaceholder()}
+
+        </main>
+
+      </div>
+
+
+      {/* =================================================
+          CAMERA MODAL
+      ================================================= */}
+
+      {cameraOpen && (
+
+        <div className="camera-modal">
+
+          <div className="camera-modal-card">
+
+
+            <div className="camera-modal-header">
+
+              <div>
+
+                <div className="panel-eyebrow">
+                  CANCERLENSE / CAMERA
+                </div>
+
+                <h3>
+                  Capture oral image
+                </h3>
+
+              </div>
+
+
+              <button
+                className="icon-button"
+                onClick={closeCamera}
+              >
+                <X size={18} />
+              </button>
+
+            </div>
+
+
+            <div className="camera-view">
+
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+              ></video>
+
+
+              <div className="camera-frame">
+
+                <div className="corner top-left"></div>
+                <div className="corner top-right"></div>
+                <div className="corner bottom-left"></div>
+                <div className="corner bottom-right"></div>
+
+              </div>
+
+
+              <div className="camera-guide">
+                Position the oral area inside the frame
+              </div>
+
+            </div>
+
+
+            <div className="camera-actions">
+
+              <button
+                className="secondary-action"
+                onClick={closeCamera}
+              >
+                Cancel
+              </button>
+
+
+              <button
+                className="analyze-button capture-button"
+                onClick={capturePhoto}
+              >
+                <Camera size={18} />
+                Capture image
+              </button>
+
+            </div>
+
+
+          </div>
+
         </div>
 
       )}
 
-      {/* ======================================================
-          PATIENT CONTEXT MODAL
-          ====================================================== */}
 
-      {showPatientContext && (
-
-        <PatientContext
-          initialData={patientContext}
-          onSave={handlePatientContextSave}
-          onClose={() =>
-            setShowPatientContext(false)
-          }
-        />
-
-      )}
+      <canvas
+        ref={canvasRef}
+        style={{ display: "none" }}
+      />
 
     </div>
+
   );
 }
 
