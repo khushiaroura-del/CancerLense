@@ -1,5 +1,32 @@
+"""
+CancerLense Prediction Pipeline
+
+AI-assisted oral lesion screening research prototype.
+
+Pipeline:
+1. Image loading
+2. Image quality assessment
+3. Smart Capture Coach
+4. MobileNetV3 classification
+5. Native PyTorch Grad-CAM
+6. Image-based lesion candidate estimation
+
+IMPORTANT:
+- This is a research screening prototype.
+- It is NOT a medical diagnosis.
+- Model confidence is NOT clinical certainty.
+- Grad-CAM shows regions influential to the model,
+  not a clinically confirmed lesion boundary.
+- Patient context does not modify model prediction.
+- Physical lesion dimensions require calibration.
+"""
+
+from __future__ import annotations
+
 import json
+import sys
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -8,85 +35,197 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
 
+from app.backend.ml.capture_coach import evaluate_capture
+from app.backend.ml.lesion_measurement import (
+    estimate_lesion_measurement,
+)
 from app.backend.ml.mobilenet_model import create_model
 
 
 # ============================================================
-# PATHS
+# PATH CONFIGURATION
 # ============================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# predict.py is located at:
+# CancerLens/app/backend/ml/predict.py
+#
+# parents[0] = ml
+# parents[1] = backend
+# parents[2] = app
+# parents[3] = CancerLens
+#
+# Therefore parents[3] is the project root.
 
-MODEL_DIR = PROJECT_ROOT / "models"
-RESULTS_DIR = PROJECT_ROOT / "results"
+PROJECT_ROOT = Path(
+    __file__
+).resolve().parents[3]
 
-GRADCAM_DIR = RESULTS_DIR / "gradcam"
+MODEL_DIR = (
+    PROJECT_ROOT / "models"
+)
 
-MODEL_PATH = MODEL_DIR / "best_model.pth"
+RESULTS_DIR = (
+    PROJECT_ROOT / "results"
+)
 
-GRADCAM_DIR.mkdir(parents=True, exist_ok=True)
+GRADCAM_DIR = (
+    RESULTS_DIR / "gradcam"
+)
+
+MODEL_PATH = (
+    MODEL_DIR / "best_model.pt"
+)
+
+GRADCAM_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
 
 
 # ============================================================
 # DEVICE
 # ============================================================
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device(
+    "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
+)
 
 
 # ============================================================
-# CLASS MAPPING
-# IMPORTANT:
-# 0 = cancer
-# 1 = non-cancer
+# CLASS LABELS
 # ============================================================
 
-CLASS_NAMES = {
-    0: "cancer",
-    1: "non_cancer",
-}
+CLASS_NAMES = [
+    "non_cancer",
+    "cancer",
+]
 
 
 # ============================================================
 # IMAGE TRANSFORM
 # ============================================================
 
-transform = transforms.Compose(
+IMAGE_SIZE = 224
+
+INFERENCE_TRANSFORM = transforms.Compose(
     [
-        transforms.Resize((224, 224)),
+        transforms.Resize(
+            (
+                IMAGE_SIZE,
+                IMAGE_SIZE,
+            )
+        ),
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225],
+            mean=[
+                0.485,
+                0.456,
+                0.406,
+            ],
+            std=[
+                0.229,
+                0.224,
+                0.225,
+            ],
         ),
     ]
 )
 
 
 # ============================================================
-# LOAD MODEL
+# MODEL LOADING
 # ============================================================
 
-def load_model():
-    model = create_model()
+def load_model() -> torch.nn.Module:
+    """
+    Load the trained CancerLense MobileNetV3 model.
+    """
+
+    print(
+        f"Loading model from: {MODEL_PATH}",
+        file=sys.stderr,
+    )
 
     if not MODEL_PATH.exists():
+
         raise FileNotFoundError(
             f"Model checkpoint not found: {MODEL_PATH}"
         )
 
+    model = create_model()
+
     checkpoint = torch.load(
         MODEL_PATH,
         map_location=DEVICE,
-        weights_only=False,
     )
 
-    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["model_state_dict"])
-    else:
-        model.load_state_dict(checkpoint)
+    # --------------------------------------------------------
+    # Support different checkpoint formats
+    # --------------------------------------------------------
 
-    model.to(DEVICE)
+    if (
+        isinstance(
+            checkpoint,
+            dict,
+        )
+        and "model_state_dict" in checkpoint
+    ):
+
+        state_dict = checkpoint[
+            "model_state_dict"
+        ]
+
+    elif (
+        isinstance(
+            checkpoint,
+            dict,
+        )
+        and "state_dict" in checkpoint
+    ):
+
+        state_dict = checkpoint[
+            "state_dict"
+        ]
+
+    else:
+
+        state_dict = checkpoint
+
+    # --------------------------------------------------------
+    # Remove DataParallel prefix if present
+    # --------------------------------------------------------
+
+    cleaned_state_dict = {}
+
+    for key, value in state_dict.items():
+
+        if key.startswith(
+            "module."
+        ):
+
+            key = key[
+                len("module.") :
+            ]
+
+        cleaned_state_dict[
+            key
+        ] = value
+
+    # --------------------------------------------------------
+    # Load weights
+    # --------------------------------------------------------
+
+    model.load_state_dict(
+        cleaned_state_dict,
+        strict=False,
+    )
+
+    model.to(
+        DEVICE
+    )
+
     model.eval()
 
     return model
@@ -96,179 +235,277 @@ def load_model():
 # IMAGE QUALITY
 # ============================================================
 
-def calculate_image_quality(image):
+def calculate_image_quality(
+    image_bgr: np.ndarray,
+) -> dict[str, Any]:
     """
-    Calculates basic image-derived quality metrics.
+    Calculate basic technical image-quality metrics.
 
-    brightness:
-        Mean grayscale intensity.
-
-    sharpness:
-        Variance of Laplacian.
-
-    These are image quality indicators only.
+    These metrics describe the image only.
+    They do not indicate disease severity.
     """
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if (
+        image_bgr is None
+        or image_bgr.size == 0
+    ):
 
-    brightness = float(np.mean(gray))
+        raise ValueError(
+            "Invalid image supplied."
+        )
 
-    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    height, width = (
+        image_bgr.shape[:2]
+    )
 
-    height, width = gray.shape
+    gray = cv2.cvtColor(
+        image_bgr,
+        cv2.COLOR_BGR2GRAY,
+    )
 
-    if width < 224 or height < 224:
-        quality_status = "LOW_RESOLUTION"
+    brightness = float(
+        np.mean(gray)
+    )
 
-    elif brightness < 35:
-        quality_status = "TOO_DARK"
+    sharpness = float(
+        cv2.Laplacian(
+            gray,
+            cv2.CV_64F,
+        ).var()
+    )
 
-    elif brightness > 235:
-        quality_status = "TOO_BRIGHT"
+    # --------------------------------------------------------
+    # Technical quality classification
+    # --------------------------------------------------------
 
-    elif sharpness < 20:
-        quality_status = "BLURRY"
+    if (
+        width < 224
+        or height < 224
+    ):
+
+        quality_status = "POOR"
+
+    elif (
+        sharpness < 20
+        or brightness < 25
+        or brightness > 245
+    ):
+
+        quality_status = "POOR"
+
+    elif (
+        sharpness < 60
+        or brightness < 45
+        or brightness > 225
+    ):
+
+        quality_status = "FAIR"
 
     else:
+
         quality_status = "ACCEPTABLE"
 
     return {
         "width": int(width),
         "height": int(height),
-        "brightness": round(brightness, 2),
-        "sharpness": round(sharpness, 2),
+        "brightness": round(
+            brightness,
+            2,
+        ),
+        "sharpness": round(
+            sharpness,
+            2,
+        ),
         "quality_status": quality_status,
     }
 
 
 # ============================================================
-# GRAD-CAM
-# NATIVE PYTORCH IMPLEMENTATION
-#
-# This replaces pytorch-grad-cam completely.
+# NATIVE GRAD-CAM
 # ============================================================
 
 class NativeGradCAM:
-    def __init__(self, model, target_layer):
+    """
+    Native PyTorch Grad-CAM implementation.
+
+    This avoids the external pytorch-grad-cam package.
+    """
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        target_layer: torch.nn.Module,
+    ):
+
         self.model = model
         self.target_layer = target_layer
 
         self.activations = None
         self.gradients = None
 
-        self.forward_handle = target_layer.register_forward_hook(
-            self._forward_hook
+        self.forward_handle = (
+            target_layer.register_forward_hook(
+                self._forward_hook
+            )
         )
 
-    def _forward_hook(self, module, inputs, output):
+        self.backward_handle = (
+            target_layer.register_full_backward_hook(
+                self._backward_hook
+            )
+        )
+
+    def _forward_hook(
+        self,
+        module,
+        inputs,
+        output,
+    ):
+
         self.activations = output
 
-        if isinstance(output, torch.Tensor):
-            output.register_hook(self._gradient_hook)
+    def _backward_hook(
+        self,
+        module,
+        grad_input,
+        grad_output,
+    ):
 
-    def _gradient_hook(self, grad):
-        self.gradients = grad
+        if grad_output:
 
-    def remove(self):
-        if self.forward_handle is not None:
-            self.forward_handle.remove()
-
-    def generate(self, input_tensor, target_class):
-        self.model.zero_grad(set_to_none=True)
-
-        output = self.model(input_tensor)
-
-        target_score = output[:, target_class].sum()
-
-        target_score.backward()
-
-        if self.activations is None:
-            raise RuntimeError(
-                "Grad-CAM activation was not captured."
+            self.gradients = (
+                grad_output[0]
             )
 
-        if self.gradients is None:
+    def remove_hooks(
+        self,
+    ):
+
+        self.forward_handle.remove()
+
+        self.backward_handle.remove()
+
+    def generate(
+        self,
+        input_tensor: torch.Tensor,
+        target_class: int,
+    ) -> np.ndarray:
+
+        self.model.zero_grad(
+            set_to_none=True
+        )
+
+        self.activations = None
+        self.gradients = None
+
+        output = self.model(
+            input_tensor
+        )
+
+        target = output[
+            0,
+            target_class
+        ]
+
+        target.backward(
+            retain_graph=True
+        )
+
+        if (
+            self.activations is None
+            or self.gradients is None
+        ):
+
             raise RuntimeError(
-                "Grad-CAM gradients were not captured."
+                "Grad-CAM activations or gradients "
+                "were not captured."
             )
 
-        activations = self.activations.detach()
-        gradients = self.gradients.detach()
+        activations = (
+            self.activations.detach()
+        )
 
-        # Global average pooling over spatial dimensions
+        gradients = (
+            self.gradients.detach()
+        )
+
+        # Global average pooling of gradients.
         weights = gradients.mean(
             dim=(2, 3),
             keepdim=True,
         )
 
-        cam = (weights * activations).sum(
+        cam = (
+            weights * activations
+        ).sum(
             dim=1,
             keepdim=True,
         )
 
-        cam = F.relu(cam)
-
-        cam = F.interpolate(
-            cam,
-            size=(224, 224),
-            mode="bilinear",
-            align_corners=False,
+        cam = F.relu(
+            cam
         )
 
-        cam = cam.squeeze(0).squeeze(0)
+        cam = cam[
+            0,
+            0
+        ].cpu().numpy()
 
-        cam = cam.cpu().numpy()
+        # Normalize to 0-1.
+        cam -= cam.min()
 
-        cam_min = cam.min()
-        cam_max = cam.max()
+        max_value = cam.max()
 
-        if cam_max - cam_min > 1e-8:
-            cam = (cam - cam_min) / (
-                cam_max - cam_min
-            )
-        else:
-            cam = np.zeros_like(cam)
+        if max_value > 0:
+
+            cam /= max_value
 
         return cam
 
 
 # ============================================================
-# TARGET LAYER
+# GRAD-CAM TARGET LAYER
 # ============================================================
 
-def get_target_layer(model):
+def get_gradcam_target_layer(
+    model: torch.nn.Module,
+) -> torch.nn.Module:
     """
-    CancerLenseModel contains the actual torchvision
-    MobileNetV3 model under model.model.
-
-    The final feature layer is used for Grad-CAM.
+    Select the final convolutional feature layer
+    of MobileNetV3 Small.
     """
 
-    return model.model.features[-1]
+    try:
+
+        return model.model.features[-1]
+
+    except Exception as exc:
+
+        raise RuntimeError(
+            "Unable to locate MobileNetV3 target layer."
+        ) from exc
 
 
 # ============================================================
-# GENERATE GRAD-CAM IMAGE
+# GRAD-CAM GENERATION
 # ============================================================
 
 def generate_gradcam(
-    model,
-    image_rgb,
-    input_tensor,
-    target_class,
-    output_path,
-):
+    model: torch.nn.Module,
+    image_bgr: np.ndarray,
+    input_tensor: torch.Tensor,
+    target_class: int,
+    output_path: Path,
+) -> None:
     """
-    Creates a Grad-CAM overlay.
-
-    Important:
-    Grad-CAM indicates image regions that influenced
-    the model prediction.
-
-    It is NOT a clinical lesion boundary.
+    Generate and save Grad-CAM overlay.
     """
 
-    target_layer = get_target_layer(model)
+    target_layer = (
+        get_gradcam_target_layer(
+            model
+        )
+    )
 
     gradcam = NativeGradCAM(
         model=model,
@@ -276,36 +513,40 @@ def generate_gradcam(
     )
 
     try:
+
         cam = gradcam.generate(
             input_tensor=input_tensor,
             target_class=target_class,
         )
-    finally:
-        gradcam.remove()
 
-    # Original image resized to model input dimensions
-    original_resized = cv2.resize(
-        image_rgb,
-        (224, 224),
+    finally:
+
+        gradcam.remove_hooks()
+
+    height, width = (
+        image_bgr.shape[:2]
     )
 
-    # Convert CAM to 8-bit
-    heatmap_uint8 = np.uint8(
-        255 * cam
+    cam_resized = cv2.resize(
+        cam,
+        (
+            width,
+            height,
+        ),
+        interpolation=cv2.INTER_LINEAR,
+    )
+
+    cam_uint8 = np.uint8(
+        cam_resized * 255
     )
 
     heatmap = cv2.applyColorMap(
-        heatmap_uint8,
+        cam_uint8,
         cv2.COLORMAP_JET,
     )
 
-    original_bgr = cv2.cvtColor(
-        original_resized,
-        cv2.COLOR_RGB2BGR,
-    )
-
     overlay = cv2.addWeighted(
-        original_bgr,
+        image_bgr,
         0.55,
         heatmap,
         0.45,
@@ -317,208 +558,156 @@ def generate_gradcam(
         overlay,
     )
 
-    return output_path
-
 
 # ============================================================
-# LESION CANDIDATE ESTIMATION
+# MODEL PREDICTION
 # ============================================================
 
-def estimate_lesion_measurement(image_bgr):
+def run_model_prediction(
+    model: torch.nn.Module,
+    image_pil: Image.Image,
+) -> dict[str, Any]:
     """
-    Estimates a candidate abnormal-looking region using
-    image processing.
-
-    IMPORTANT:
-    This is NOT a clinical lesion segmentation algorithm.
-
-    Physical dimensions cannot be calculated without
-    a valid calibration reference.
+    Run MobileNetV3 classification.
     """
 
-    image = image_bgr.copy()
-
-    height, width = image.shape[:2]
-
-    hsv = cv2.cvtColor(
-        image,
-        cv2.COLOR_BGR2HSV,
+    input_tensor = (
+        INFERENCE_TRANSFORM(
+            image_pil
+        )
+        .unsqueeze(0)
+        .to(DEVICE)
     )
 
-    # HSV channels
-    saturation = hsv[:, :, 1]
-    value = hsv[:, :, 2]
+    with torch.no_grad():
 
-    # Red / pink candidate regions
-    red_1 = cv2.inRange(
-        hsv,
-        np.array([0, 45, 45]),
-        np.array([15, 255, 255]),
-    )
-
-    red_2 = cv2.inRange(
-        hsv,
-        np.array([165, 45, 45]),
-        np.array([180, 255, 255]),
-    )
-
-    red_mask = cv2.bitwise_or(
-        red_1,
-        red_2,
-    )
-
-    # Filter out extremely dark pixels
-    valid_brightness = cv2.inRange(
-        value,
-        45,
-        255,
-    )
-
-    mask = cv2.bitwise_and(
-        red_mask,
-        valid_brightness,
-    )
-
-    # Morphological cleanup
-    kernel = np.ones(
-        (7, 7),
-        np.uint8,
-    )
-
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_OPEN,
-        kernel,
-    )
-
-    mask = cv2.morphologyEx(
-        mask,
-        cv2.MORPH_CLOSE,
-        kernel,
-    )
-
-    contours, _ = cv2.findContours(
-        mask,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
-    )
-
-    candidates = []
-
-    image_area = width * height
-
-    for contour in contours:
-        area = cv2.contourArea(contour)
-
-        if area < image_area * 0.002:
-            continue
-
-        if area > image_area * 0.80:
-            continue
-
-        x, y, w, h = cv2.boundingRect(contour)
-
-        if w < 20 or h < 20:
-            continue
-
-        candidates.append(
-            {
-                "contour": contour,
-                "area": float(area),
-                "x": int(x),
-                "y": int(y),
-                "width": int(w),
-                "height": int(h),
-            }
+        logits = model(
+            input_tensor
         )
 
-    if not candidates:
-        return {
-            "status": "NOT_ESTIMATED",
-            "method": "image-based candidate region estimation",
-            "width_pixels": None,
-            "height_pixels": None,
-            "area_pixels": None,
-            "center": None,
-            "bounding_box": None,
-            "calibration_available": False,
-            "physical_size": None,
-            "note": (
-                "No reliable candidate region was identified "
-                "using the current image-based estimation method."
-            ),
-        }
+        probabilities = torch.softmax(
+            logits,
+            dim=1,
+        )[0]
 
-    # Select largest reasonable candidate
-    candidate = max(
-        candidates,
-        key=lambda item: item["area"],
+    predicted_index = int(
+        torch.argmax(
+            probabilities
+        ).item()
     )
 
-    x = candidate["x"]
-    y = candidate["y"]
-    w = candidate["width"]
-    h = candidate["height"]
-    area = candidate["area"]
+    prediction_class = (
+        CLASS_NAMES[
+            predicted_index
+        ]
+    )
 
-    center_x = x + (w / 2)
-    center_y = y + (h / 2)
+    class_scores = {}
+
+    for index, class_name in enumerate(
+        CLASS_NAMES
+    ):
+
+        class_scores[
+            class_name
+        ] = round(
+            float(
+                probabilities[
+                    index
+                ].item()
+                * 100
+            ),
+            2,
+        )
+
+    model_confidence = round(
+        float(
+            probabilities[
+                predicted_index
+            ].item()
+            * 100
+        ),
+        2,
+    )
 
     return {
-        "status": "ESTIMATED",
-        "method": "image-based candidate region estimation",
-        "width_pixels": int(w),
-        "height_pixels": int(h),
-        "area_pixels": round(area, 2),
-        "center": {
-            "x": round(center_x, 2),
-            "y": round(center_y, 2),
-        },
-        "bounding_box": {
-            "x": int(x),
-            "y": int(y),
-            "width": int(w),
-            "height": int(h),
-        },
-        "calibration_available": False,
-        "physical_size": None,
-        "note": (
-            "Physical size in millimeters or centimeters "
-            "cannot be determined without a valid image "
-            "calibration reference."
-        ),
+        "input_tensor": input_tensor,
+        "prediction_class": prediction_class,
+        "predicted_index": predicted_index,
+        "model_confidence": model_confidence,
+        "class_scores": class_scores,
     }
 
 
 # ============================================================
-# MAIN PREDICTION FUNCTION
+# SCREENING SIGNAL
 # ============================================================
 
-def predict_image(image_path):
+def get_screening_signal(
+    prediction_class: str,
+) -> str:
     """
-    Main CancerLense inference pipeline.
-
-    Returns:
-        quality
-        screening signal
-        prediction
-        confidence
-        class scores
-        Grad-CAM
-        lesion measurement
-        recommendation
-        research disclaimer
+    Convert model output into a research screening signal.
     """
 
-    image_path = Path(image_path)
+    if prediction_class == "cancer":
+
+        return "CANCER-CLASS SIGNAL"
+
+    return "NON-CANCER-CLASS SIGNAL"
+
+
+# ============================================================
+# RECOMMENDATION
+# ============================================================
+
+def get_recommendation(
+    prediction_class: str,
+) -> str:
+    """
+    Generate research workflow recommendation.
+
+    This is not a medical diagnosis.
+    """
+
+    if prediction_class == "cancer":
+
+        return (
+            "Professional clinical examination is "
+            "recommended for further evaluation."
+        )
+
+    return (
+        "No cancer-class signal was identified by "
+        "the current research model. Clinical evaluation "
+        "may still be appropriate based on symptoms or "
+        "professional assessment."
+    )
+
+
+# ============================================================
+# MAIN PREDICTION PIPELINE
+# ============================================================
+
+def predict_image(
+    image_path: str | Path,
+) -> dict[str, Any]:
+    """
+    Complete CancerLense inference pipeline.
+    """
+
+    image_path = Path(
+        image_path
+    )
 
     if not image_path.exists():
+
         raise FileNotFoundError(
             f"Image not found: {image_path}"
         )
 
     # --------------------------------------------------------
-    # Load original image
+    # Read image
     # --------------------------------------------------------
 
     image_bgr = cv2.imread(
@@ -526,21 +715,22 @@ def predict_image(image_path):
     )
 
     if image_bgr is None:
+
         raise ValueError(
-            "Unable to read image."
+            f"Unable to read image: {image_path}"
         )
+
+    # --------------------------------------------------------
+    # Convert BGR → RGB
+    # --------------------------------------------------------
 
     image_rgb = cv2.cvtColor(
         image_bgr,
         cv2.COLOR_BGR2RGB,
     )
 
-    # --------------------------------------------------------
-    # Image quality
-    # --------------------------------------------------------
-
-    quality = calculate_image_quality(
-        image_bgr
+    image_pil = Image.fromarray(
+        image_rgb
     )
 
     # --------------------------------------------------------
@@ -550,126 +740,150 @@ def predict_image(image_path):
     model = load_model()
 
     # --------------------------------------------------------
-    # Prepare input
+    # Image quality
     # --------------------------------------------------------
 
-    pil_image = Image.fromarray(
-        image_rgb
-    )
-
-    input_tensor = transform(
-        pil_image
-    ).unsqueeze(0)
-
-    input_tensor = input_tensor.to(
-        DEVICE
-    )
-
-    # --------------------------------------------------------
-    # Prediction
-    # --------------------------------------------------------
-
-    with torch.no_grad():
-        logits = model(
-            input_tensor
+    quality = (
+        calculate_image_quality(
+            image_bgr
         )
-
-        probabilities = torch.softmax(
-            logits,
-            dim=1,
-        )
-
-    predicted_index = int(
-        torch.argmax(
-            probabilities,
-            dim=1,
-        ).item()
     )
 
-    predicted_class = CLASS_NAMES[
-        predicted_index
+    # --------------------------------------------------------
+    # Smart Capture Coach
+    # --------------------------------------------------------
+
+    capture_coach = (
+        evaluate_capture(
+            image_bgr
+        )
+    )
+
+    # --------------------------------------------------------
+    # MobileNetV3 prediction
+    # --------------------------------------------------------
+
+    prediction = (
+        run_model_prediction(
+            model=model,
+            image_pil=image_pil,
+        )
+    )
+
+    input_tensor = prediction[
+        "input_tensor"
     ]
 
-    confidence = float(
-        probabilities[
-            0,
-            predicted_index
-        ].item()
-        * 100
-    )
+    prediction_class = prediction[
+        "prediction_class"
+    ]
 
-    cancer_score = float(
-        probabilities[0, 0].item()
-        * 100
-    )
+    predicted_index = prediction[
+        "predicted_index"
+    ]
 
-    non_cancer_score = float(
-        probabilities[0, 1].item()
-        * 100
-    )
+    model_confidence = prediction[
+        "model_confidence"
+    ]
+
+    class_scores = prediction[
+        "class_scores"
+    ]
 
     # --------------------------------------------------------
     # Screening signal
     # --------------------------------------------------------
 
-    if predicted_class == "cancer":
-        screening_signal = "CANCER-CLASS SIGNAL"
-
-        recommendation = (
-            "Professional clinical examination "
-            "is recommended for further evaluation."
+    screening_signal = (
+        get_screening_signal(
+            prediction_class
         )
+    )
 
-    else:
-        screening_signal = "NON-CANCER-CLASS SIGNAL"
+    # --------------------------------------------------------
+    # Recommendation
+    # --------------------------------------------------------
 
-        recommendation = (
-            "The image produced a non-cancer-class "
-            "model signal. Clinical assessment may "
-            "still be appropriate based on symptoms "
-            "and professional evaluation."
+    recommendation = (
+        get_recommendation(
+            prediction_class
         )
+    )
 
     # --------------------------------------------------------
     # Grad-CAM
     # --------------------------------------------------------
 
-    gradcam_path = None
-
-    gradcam_filename = (
-        image_path.stem
-        + "_gradcam.jpg"
-    )
-
-    gradcam_output = (
+    gradcam_path = (
         GRADCAM_DIR
-        / gradcam_filename
+        / f"{image_path.stem}_gradcam.jpg"
     )
 
     try:
-        gradcam_path = generate_gradcam(
+
+        generate_gradcam(
             model=model,
-            image_rgb=image_rgb,
+            image_bgr=image_bgr,
             input_tensor=input_tensor,
             target_class=predicted_index,
-            output_path=gradcam_output,
+            output_path=gradcam_path,
         )
 
-    except Exception as error:
+        gradcam_result = str(
+            gradcam_path
+        )
+
+    except Exception as exc:
+
+        gradcam_result = None
+
         print(
-            f"[CancerLense] Grad-CAM generation failed: {error}"
+            f"Warning: Grad-CAM generation failed: {exc}",
+            file=sys.stderr,
         )
 
-        gradcam_path = None
-
     # --------------------------------------------------------
-    # Lesion measurement
+    # Lesion candidate estimation
     # --------------------------------------------------------
 
-    lesion_measurement = (
-        estimate_lesion_measurement(
-            image_bgr
+    try:
+
+        lesion_measurement = (
+            estimate_lesion_measurement(
+                image_bgr
+            )
         )
+
+    except Exception as exc:
+
+        lesion_measurement = {
+            "status": "NOT_ESTIMATED",
+            "method": (
+                "image-based candidate region estimation"
+            ),
+            "candidate_score": None,
+            "candidate_area_ratio": None,
+            "width_pixels": None,
+            "height_pixels": None,
+            "area_pixels": None,
+            "center": None,
+            "bounding_box": None,
+            "calibration_available": False,
+            "physical_size": None,
+            "note": (
+                "Lesion candidate estimation could not "
+                f"be completed: {exc}"
+            ),
+        }
+
+    # --------------------------------------------------------
+    # Research disclaimer
+    # --------------------------------------------------------
+
+    note = (
+        "This is an AI-assisted research screening output "
+        "and not a medical diagnosis. Model confidence is "
+        "not clinical certainty."
     )
 
     # --------------------------------------------------------
@@ -679,40 +893,23 @@ def predict_image(image_path):
     result = {
         "status": "ANALYZED",
 
+        "capture_coach": capture_coach,
+
         "quality": quality,
 
         "screening_signal": screening_signal,
 
-        "prediction_class": predicted_class,
+        "prediction_class": prediction_class,
 
-        "model_confidence": round(
-            confidence,
-            2,
-        ),
+        "model_confidence": model_confidence,
 
-        "class_scores": {
-            "cancer": round(
-                cancer_score,
-                2,
-            ),
-            "non_cancer": round(
-                non_cancer_score,
-                2,
-            ),
-        },
+        "class_scores": class_scores,
 
         "recommendation": recommendation,
 
-        "note": (
-            "This is an AI-assisted research "
-            "screening output and not a medical diagnosis."
-        ),
+        "note": note,
 
-        "gradcam": (
-            str(gradcam_path)
-            if gradcam_path
-            else None
-        ),
+        "gradcam": gradcam_result,
 
         "lesion_measurement": lesion_measurement,
     }
@@ -721,30 +918,64 @@ def predict_image(image_path):
 
 
 # ============================================================
-# CLI SUPPORT
+# COMMAND LINE INTERFACE
+# ============================================================
+
+def main() -> None:
+    """
+    Command-line interface for CancerLense.
+    """
+
+    if len(sys.argv) < 2:
+
+        print(
+            "Usage:"
+        )
+
+        print(
+            'python -m app.backend.ml.predict '
+            '"path\\to\\image.jpg"'
+        )
+
+        sys.exit(1)
+
+    image_path = sys.argv[1]
+
+    try:
+
+        result = predict_image(
+            image_path
+        )
+
+        print(
+            json.dumps(
+                result,
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+
+    except Exception as exc:
+
+        error_result = {
+            "status": "ERROR",
+            "error": str(exc),
+        }
+
+        print(
+            json.dumps(
+                error_result,
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+
+        sys.exit(1)
+
+
+# ============================================================
+# ENTRY POINT
 # ============================================================
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="CancerLense image prediction"
-    )
-
-    parser.add_argument(
-        "image",
-        help="Path to image",
-    )
-
-    args = parser.parse_args()
-
-    result = predict_image(
-        args.image
-    )
-
-    print(
-        json.dumps(
-            result,
-            indent=2,
-        )
-    )
+    main()
